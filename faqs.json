@@ -1,0 +1,87 @@
+[
+  {
+    "id": "plazo_devolucion",
+    "question": "¿Cuál es el plazo para hacer cambios o devoluciones?",
+    "answer": "El plazo es de 30 días desde la recepción del pedido. En campañas especiales como Black Friday o Rebajas, el plazo se amplía a 60 días."
+  },
+  {
+    "id": "como_devolver",
+    "question": "¿Cómo puedo realizar un cambio o devolución?",
+    "answer": "Para comenzar, entra en este enlace: https://returns.reveni.io/izas-outdoor. Necesitarás tu número de pedido y el correo de compra. Sigue las instrucciones del portal."
+  },
+  {
+    "id": "coste_devolucion",
+    "question": "¿Cuánto cuesta hacer un cambio o devolución?",
+    "answer": "Los cambios son gratuitos (si realizas todos los cambios de un pedido a la vez). Las devoluciones tienen un coste de 4,99€ si se hacen por transporte, o son gratuitas si las realizas en una tienda oficial Izas."
+  },
+  {
+    "id": "producto_defectuoso",
+    "question": "¿Qué hago si recibo un producto defectuoso o incorrecto?",
+    "answer": "Si has recibido una prenda defectuosa o incorrecta, escríbenos a info@izas-outdoor.com y te ayudaremos a resolverlo inmediatamente."
+  },
+  {
+    "id": "reembolso_dinero",
+    "question": "¿Cómo y cuándo recibiré mi reembolso?",
+    "answer": "El reembolso es instantáneo. Puedes elegir recibirlo por transferencia bancaria (en segundos) o en el método de pago original (puede tardar 1-3 días). Recuerda que no se reembolsan los gastos de envío originales."
+  },
+  {
+    "id": "devolucion_tienda",
+    "question": "¿Puedo devolver un pedido online en una tienda física?",
+    "answer": "Sí, puedes devolver gratis en nuestras tiendas oficiales. Tienes dos opciones:\n1. Llevar el artículo y enseñar el correo de confirmación.\n2. Gestionar la solicitud en https://returns.reveni.io/izas-outdoor y llevar las prendas a la tienda."
+  },
+  {
+    "id": "cancelar_pedido",
+    "question": "¿Puedo cancelar o modificar mi pedido?",
+    "answer": "Solo podemos cancelarlo si aún no ha sido preparado. Para intentarlo, rellena este formulario urgentemente: https://forms.gle/9v3e7fbEATyV1B8u5"
+  },
+  {
+    "id": "paises_envio",
+    "question": "¿A qué países hacéis envíos?",
+    "answer": "Enviamos a España (Península y Baleares), Alemania, Bélgica, Italia, Francia y Portugal. No enviamos a Canarias, Ceuta, Melilla ni Andorra."
+  },
+  {
+    "id": "tiempo_envio",
+    "question": "¿Cuánto tardan los envíos?",
+    "answer": "El plazo de entrega es de 24 a 48 horas laborables en España. En periodos de promociones (Rebajas, Black Friday) puede demorarse un poco más."
+  },
+  {
+    "id": "coste_envio",
+    "question": "¿Cuánto cuestan los gastos de envío?",
+    "answer": "El envío es GRATIS para pedidos superiores a 39,99€. Para pedidos inferiores, el coste es de 4,99€."
+  },
+  {
+    "id": "devolucion_externa",
+    "question": "¿Puedo devolver aquí algo comprado en Amazon o El Corte Inglés?",
+    "answer": "No. Si compraste en otro canal (Amazon, El Corte Inglés, etc.), debes gestionar la devolución directamente a través de esa plataforma, ya que nosotros no tenemos acceso a esos pedidos."
+  },
+  {
+    "id": "contacto_agente",
+    "question": "¿Puedo hablar con un agente humano?",
+    "answer": "¡Claro! Si están disponibles, te contestarán por aquí. Si no, escríbenos a info@izas-outdoor.com y te responderemos lo antes posible."
+  },
+  {
+    "id": "financiacion",
+    "question": "¿Puedo financiar mi compra?",
+    "answer": "Sí, puedes financiar tu compra a 3, 6 o 12 meses. Verás la opción y las condiciones durante el proceso de pago."
+  },
+  {
+    "id": "seguimiento_pedido",
+    "question": "¿Dónde está mi pedido? ¿Cómo lo rastreo?",
+    "answer": "Revisa tu correo (incluyendo Spam), allí deberías tener un email de la empresa de transporte. Si no lo encuentras o no funciona, por favor escribe a info@izas-outdoor.com indicando tu nombre y número de pedido. Mis compañeros de logística te responderán enseguida, ya que yo no tengo acceso a la ubicación en tiempo real."
+  },
+  {
+    "id": "que_es_pudo",
+    "question": "¿Qué es un PUDO?",
+    "answer": "PUDO (Pick Up & Drop Off) son puntos de recogida como tiendas asociadas o taquillas inteligentes donde puedes recibir tu pedido sin tener que estar en casa."
+  },
+  {
+    "id": "error_correos",
+    "question": "¿Por qué mi número de seguimiento no funciona en Correos?",
+    "answer": "Si la web de Correos sale en blanco, contáctanos en info@izas-outdoor.com con el asunto 'Incidencia Seguimiento - [Tu Pedido]'. Podría ser una incidencia logística que debemos reclamar."
+  },
+  {
+    "id": "ausente_casa",
+    "question": "No estaba en casa y han dejado el paquete en un punto de recogida",
+    "answer": "Si no estabas, el transportista puede dejarlo en un punto cercano para agilizar. Si necesitas entrega en domicilio obligatoria, escríbenos a info@izas-outdoor.com para intentar reprogramarlo."
+  }
+]
