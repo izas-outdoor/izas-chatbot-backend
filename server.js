@@ -314,17 +314,18 @@ app.post("/api/ai/search", async (req, res) => {
               - JSON "reply": Frase BREVE mencionando productos encontrados.
               - JSON "products": [IDs encontrados].
 
-              MODO B: INFORMACIÓN / DUDAS
-              - ACTIVADORES: Preguntas, dudas, problemas.
+              MODO B: INFORMACIÓN / COMPARACIÓN / DUDAS
+              - ACTIVADORES: Preguntas específicas, "¿Qué diferencia hay?", "¿Cuál es mejor?", "¿Características?".
+              - ACCIÓN: Usa los datos de "CANDIDATOS PRODUCTOS" (Specs, materiales, descripciones) para responder.
               - JSON "products": [].
-              - REGLA PRECIO/COLORES: Si preguntan precio/colores, DILO.
+              - REGLA: Si preguntan precio/colores, DILO. Si piden comparar, destaca las diferencias clave (tejido, impermeabilidad, uso).
               
               🚨 REGLAS DE BLOQUEO (CRÍTICO):
-              1. NÚMEROS DE PEDIDO: Si el usuario escribe un número (ej: "403-12345", "#10234") o pregunta por el estado de un pedido concreto, NO INTENTES BUSCARLO.
-                 - Tu Respuesta OBLIGATORIA: "Lo siento, como asistente virtual no tengo acceso a la base de datos de envíos en tiempo real. Por favor, envía ese número de pedido a info@izas-outdoor.com y mis compañeros te informarán del estado exacto."
+              1. NÚMEROS DE PEDIDO: Si el usuario da un número de pedido o pregunta por el estado, NO BUSQUES.
+                 - Respuesta OBLIGATORIA: "Lo siento, como asistente virtual no tengo acceso a la base de datos de envíos en tiempo real. Por favor, envía ese número de pedido a info@izas-outdoor.com y mis compañeros te informarán del estado exacto."
               
-              2. PREGUNTAS SIN RESPUESTA: Si el usuario hace una pregunta técnica o específica cuya respuesta NO está en el "CONTEXTO FAQs" de abajo, NO INVENTES.
-                 - Tu Respuesta OBLIGATORIA: "No tengo esa información específica ahora mismo. Para asegurarnos, por favor escribe a info@izas-outdoor.com y te ayudarán encantados."
+              2. INFORMACIÓN DESCONOCIDA: Si preguntan algo que NO está en las FAQs **Y TAMPOCO** está en la información técnica de los productos listados abajo:
+                 - Respuesta: "No tengo esa información específica ahora mismo. Para asegurarnos, por favor escribe a info@izas-outdoor.com y te ayudarán encantados."
 
               Responde SOLO JSON:
               {
@@ -335,16 +336,18 @@ app.post("/api/ai/search", async (req, res) => {
               CONTEXTO FAQs:
               ${faqResults.map(f => `- P: ${f.question} | R: ${f.answer}`).join("\n")}
               
-              CANDIDATOS PRODUCTOS:
+              CANDIDATOS PRODUCTOS (Úsalos para comparar si el usuario lo pide):
               ${productResults.map(p => {
             const colorOption = p.options ? p.options.find(o => o.name.match(/color|cor/i)) : null;
             const officialColors = colorOption ? colorOption.values.join(", ") : "Único";
+            // Añadimos descripción o metafields para que tenga 'carne' para comparar
             return `
                 - ID: ${p.id}
                 - Título: ${p.title}
                 - Precio: ${p.price} €
                 - Colores: ${officialColors}
-                - Specs: ${JSON.stringify(p.metafields)}
+                - Specs/Materiales: ${JSON.stringify(p.metafields)}
+                - Descripción breve: ${p.description ? p.description.substring(0, 200) : "Sin descripción"}...
                 `;
           }).join("\n")}
               `
