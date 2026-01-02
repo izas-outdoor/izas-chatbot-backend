@@ -116,7 +116,6 @@ function metafieldToText(key, value) {
 }
 
 /* ---------------- Products fetch ---------------- */
-/* --- EN server.js --- */
 
 async function getAllProducts() {
   let hasNextPage = true;
@@ -132,6 +131,7 @@ async function getAllProducts() {
           node {
             id title description productType tags handle
             images(first: 1) { edges { node { url } } }
+            body_html
             
             # --- RECUPERAMOS LAS OPCIONES (Aquí están los colores limpios) ---
             options {
@@ -168,6 +168,7 @@ async function getAllProducts() {
         title: node.title,
         handle: node.handle,
         description: node.description,
+        body_html: node.body_html, // AÑADIDO PARA TENER MÁS INFO
         productType: node.productType,
         price: node.variants.edges[0]?.node.price || "Consultar",
         tags: node.tags,
@@ -228,8 +229,7 @@ async function loadIndexes() {
   }
 }
 
-/* --- EN server.js --- */
-
+/* --- Helper de refinamiento --- */
 async function refineQuery(userQuery, history) {
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -245,18 +245,9 @@ async function refineQuery(userQuery, history) {
         1. Mira el último mensaje del ASISTENTE en el historial. ¿Mencionó algún producto específico?
         2. Si el usuario hace una pregunta de seguimiento (ej: "¿qué colores tiene?", "¿y en rosa?", "¿es impermeable?"), DEBES incluir el NOMBRE DEL PRODUCTO en tu traducción.
         3. Si el usuario dice solo colores (ej: "están en negro y rosa"), asume que se refiere al producto anterior y genera: "chaqueta [Nombre] color negro y rosa".
-
-        EJEMPLO:
-        - Historial Bot: "Te recomiendo la Chaqueta Sedona."
-        - Usuario: "¿Qué colores hay?"
-        - TU RESPUESTA: "colores disponibles chaqueta Sedona"
-
-        - Historial Bot: "La chaqueta Sedona es genial."
-        - Usuario: "están en negro y rosa"
-        - TU RESPUESTA: "chaqueta Sedona color negro y rosa"
         `
       },
-      ...history.slice(-4), // Le pasamos un poco más de historial por si acaso
+      ...history.slice(-4), 
       { role: "user", content: userQuery }
     ],
     temperature: 0
@@ -267,89 +258,126 @@ async function refineQuery(userQuery, history) {
 /* ---------------- Similarity ---------------- */
 
 function cosineSimilarity(a, b) {
-  return a.reduce((acc, val, i) => acc + val * b[i], 0); // Simplificado
+  return a.reduce((acc, val, i) => acc + val * b[i], 0); 
 }
 
-/* --- ENDPOINT PRINCIPAL --- */
+// --- LIMPIEZA DE TEXTO (NUEVO) ---
+function cleanText(text) {
+  if (!text) return "Sin información";
+  return text
+    .replace(/<[^>]*>?/gm, " ") // Elimina HTML
+    .replace(/\s+/g, " ")       // Elimina espacios extra
+    .trim()
+    .substring(0, 600);         // Limita longitud
+}
+
+/* --- ENDPOINT PRINCIPAL (MODIFICADO CON MEMORIA VISUAL) --- */
 app.post("/api/ai/search", async (req, res) => {
-  const { q, history } = req.body;
+  const { q, history, visible_ids } = req.body; // <--- ACEPTAMOS visible_ids
   if (!q) return res.status(400).json({ error: "Falta query" });
 
   try {
     const optimizedQuery = await refineQuery(q, history || []);
 
-    // Embedding
+    if (aiIndex.length === 0) await loadIndexes();
+
+    // 1. RECUPERAR PRODUCTOS VISIBLES (MEMORIA VISUAL)
+    let contextProducts = [];
+    if (visible_ids && visible_ids.length > 0) {
+      contextProducts = aiIndex.filter(p => visible_ids.map(String).includes(String(p.id)));
+    }
+
+    // 2. EMBEDDING
     const embResponse = await openai.embeddings.create({ model: "text-embedding-3-large", input: optimizedQuery });
     const vector = embResponse.data[0].embedding;
 
-    // Búsqueda Híbrida
-    if (aiIndex.length === 0) await loadIndexes();
-
-    // Productos (Top 10)
-    const productResults = aiIndex
+    // 3. BÚSQUEDA VECTORIAL (NUEVOS CANDIDATOS)
+    const searchResults = aiIndex
       .map(p => ({ ...p, score: cosineSimilarity(vector, p.embedding) }))
       .sort((a, b) => b.score - a.score)
-      .slice(0, 10);
+      .slice(0, 8);
 
-    // FAQs (Top 2)
+    // 4. COMBINAR: PRIORIDAD A LO VISIBLE
+    const combinedCandidates = new Map();
+
+    // Primero añadimos los que ya está viendo (Contexto fuerte)
+    contextProducts.forEach(p => combinedCandidates.set(String(p.id), p));
+
+    // Luego rellenamos con la búsqueda nueva hasta tener máx 10
+    searchResults.forEach(p => {
+      if (combinedCandidates.size < 10) {
+        combinedCandidates.set(String(p.id), p);
+      }
+    });
+
+    const finalCandidatesList = Array.from(combinedCandidates.values());
+
+    // 5. FAQs
     const faqResults = faqIndex
       .map(f => ({ ...f, score: cosineSimilarity(vector, f.embedding) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 2);
 
-    // 4. IA CEREBRO TOTAL
+    // 6. PREPARACIÓN DE CONTEXTO (Usando cleanText y marcando visibles)
+    const productsContext = finalCandidatesList.map(p => {
+        const colorOption = p.options ? p.options.find(o => o.name.match(/color|cor/i)) : null;
+        const officialColors = colorOption ? colorOption.values.join(", ") : "Único";
+        const cleanDescription = cleanText(p.body_html || p.description);
+        const cleanSpecs = p.metafields ? JSON.stringify(p.metafields) : "Sin especificaciones";
+        
+        // Marcamos si el producto está visible actualmente para que la IA lo sepa
+        const isVisible = visible_ids && visible_ids.map(String).includes(String(p.id)) ? "(EN PANTALLA)" : "";
+
+        return `
+        PRODUCTO ${isVisible}:
+        - ID: ${p.id}
+        - Título: ${p.title}
+        - Precio: ${p.price} €
+        - Colores: ${officialColors}
+        - Descripción: ${cleanDescription}
+        - Specs: ${cleanSpecs}
+        `;
+    }).join("\n\n");
+
+    // 7. IA CEREBRO TOTAL
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       response_format: { type: "json_object" },
       messages: [
         {
           role: "system",
-          content: `Eres Sazi, un asistente experto de Izas.
+          content: `Eres un asistente experto de Izas.
               
+              CONTEXTO ACTUAL:
+              El usuario está viendo estos productos: ${visible_ids ? visible_ids.length : 0} productos.
+              Si te pide "diferencias", "cuál es mejor" o detalles, REFIÉRETE PRINCIPALMENTE A LOS PRODUCTOS MARCADOS COMO "(EN PANTALLA)" en la lista de abajo, a menos que la pregunta sea claramente una búsqueda nueva.
+
               TU MISIÓN:
-              Analiza la intención. Decide si busca PRODUCTOS (Escaparate) o INFORMACIÓN.
+              Analiza la intención. Decide si busca PRODUCTOS (Escaparate) o INFORMACIÓN (Detalles/Comparar).
 
               MODO A: ESCAPARATE / BUSCADOR
-              - ACTIVADORES: "Quiero...", "Busco...", "Necesito...", "Enséñame...", Filtros (barato, rojo, etc).
-              - JSON "reply": Frase BREVE mencionando productos encontrados.
-              - JSON "products": [IDs encontrados].
+              (Ej: "Quiero chaqueta", "Enséñame algo para hombre")
+              - JSON "reply": Frase de introducción breve con nombres de productos.
+              - JSON "products": [Lista de IDs].
+              - PROHIBIDO EN MODO A: No pongas precios ni specs en el texto.
 
-              MODO B: INFORMACIÓN / COMPARACIÓN / DUDAS
-              - ACTIVADORES: Preguntas específicas, "¿Qué diferencia hay?", "¿Cuál es mejor?", "¿Características?".
-              - ACCIÓN: Usa los datos de "CANDIDATOS PRODUCTOS" (Specs, materiales, descripciones) para responder.
-              - JSON "products": [].
-              - REGLA: Si preguntan precio/colores, DILO. Si piden comparar, destaca las diferencias clave (tejido, impermeabilidad, uso).
+              MODO B: INFORMACIÓN / DETALLES / PRECIOS
+              (Ej: "¿Cuánto cuesta?", "¿Qué colores tiene?", "¿Diferencias?", "¿Cuál es mejor?")
+              - JSON "reply": Responde a la pregunta exacta usando los datos de abajo. Si compara, usa las descripciones y specs.
+              - JSON "products": [] (Vacío, para no repetir tarjetas).
+              - REGLA: Si pregunta PRECIO o COLORES, DILO.
               
-              🚨 REGLAS DE BLOQUEO (CRÍTICO):
-              1. NÚMEROS DE PEDIDO: Si el usuario da un número de pedido o pregunta por el estado, NO BUSQUES.
-                 - Respuesta OBLIGATORIA: "Lo siento, como asistente virtual no tengo acceso a la base de datos de envíos en tiempo real. Por favor, envía ese número de pedido a info@izas-outdoor.com y mis compañeros te informarán del estado exacto."
-              
-              2. INFORMACIÓN DESCONOCIDA: Si preguntan algo que NO está en las FAQs **Y TAMPOCO** está en la información técnica de los productos listados abajo:
-                 - Respuesta: "No tengo esa información específica ahora mismo. Para asegurarnos, por favor escribe a info@izas-outdoor.com y te ayudarán encantados."
-
               Responde SOLO JSON:
               {
                 "reply": "Texto...",
-                "products": [ { "id": "ID", "variant_id": "ID_VAR" } ]
+                "products": [ { "id": "ID" } ]
               }
               
               CONTEXTO FAQs:
               ${faqResults.map(f => `- P: ${f.question} | R: ${f.answer}`).join("\n")}
               
-              CANDIDATOS PRODUCTOS (Úsalos para comparar si el usuario lo pide):
-              ${productResults.map(p => {
-            const colorOption = p.options ? p.options.find(o => o.name.match(/color|cor/i)) : null;
-            const officialColors = colorOption ? colorOption.values.join(", ") : "Único";
-            // Añadimos descripción o metafields para que tenga 'carne' para comparar
-            return `
-                - ID: ${p.id}
-                - Título: ${p.title}
-                - Precio: ${p.price} €
-                - Colores: ${officialColors}
-                - Specs/Materiales: ${JSON.stringify(p.metafields)}
-                - Descripción breve: ${p.description ? p.description.substring(0, 200) : "Sin descripción"}...
-                `;
-          }).join("\n")}
+              CANDIDATOS PRODUCTOS (Data Source):
+              ${productsContext}
               `
         },
         ...history.slice(-2).map(m => ({ role: m.role, content: m.content })),
@@ -359,24 +387,24 @@ app.post("/api/ai/search", async (req, res) => {
 
     const aiContent = JSON.parse(completion.choices[0].message.content);
 
-    // 5. FUSIÓN DE DATOS (CON DEDUPLICACIÓN)
-    const seenIds = new Set(); // <--- Aquí apuntaremos los que ya hemos metido
+    // 8. PROCESAMIENTO ROBUSTO DE IDs (Soporta strings y objetos)
+    const seenIds = new Set(); 
 
     const finalProducts = (aiContent.products || []).map(aiProd => {
-      const original = productResults.find(p => p.id === aiProd.id);
+      // Manejamos si la IA devuelve ID directo o objeto {id: ...}
+      const targetId = typeof aiProd === 'object' ? aiProd.id : aiProd;
+      
+      const original = finalCandidatesList.find(p => String(p.id) === String(targetId));
 
-      // Si no existe o YA LO HEMOS VISTO, lo saltamos
       if (!original || seenIds.has(original.id)) return null;
 
-      // Si es nuevo, lo apuntamos en la lista de vistos
       seenIds.add(original.id);
 
       let displayImage = original.image;
       let displayUrlParams = "";
 
-      // Si la IA eligió una variante (color), usamos su foto y ID
-      if (aiProd.variant_id && original.variants) {
-        const variantData = original.variants.find(v => v.id === aiProd.variant_id);
+      if (typeof aiProd === 'object' && aiProd.variant_id && original.variants) {
+        const variantData = original.variants.find(v => String(v.id) === String(aiProd.variant_id));
         if (variantData) {
           if (variantData.image) displayImage = variantData.image;
           displayUrlParams = `?variant=${variantData.id}`;
@@ -388,7 +416,7 @@ app.post("/api/ai/search", async (req, res) => {
         displayImage,
         displayUrlParams
       };
-    }).filter(Boolean); // Limpiamos los nulos (repetidos)
+    }).filter(Boolean);
 
     res.json({ products: finalProducts, text: aiContent.reply });
 
