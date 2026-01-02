@@ -131,7 +131,9 @@ async function getAllProducts() {
           node {
             id title description productType tags handle
             images(first: 1) { edges { node { url } } }
-            body_html
+            
+            # --- CORRECCIÓN AQUÍ: Usamos descriptionHtml en lugar de body_html ---
+            descriptionHtml 
             
             # --- RECUPERAMOS LAS OPCIONES (Aquí están los colores limpios) ---
             options {
@@ -151,6 +153,13 @@ async function getAllProducts() {
 
   while (hasNextPage) {
     const data = await fetchGraphQL(query, { cursor });
+    
+    // Si hay error en la query, data será null y romperá aquí.
+    if (!data || !data.products) {
+        console.error("❌ Error grave recuperando productos. Revisa los permisos de Shopify.");
+        break;
+    }
+
     const edges = data.products.edges;
 
     edges.forEach(({ node }) => {
@@ -168,7 +177,10 @@ async function getAllProducts() {
         title: node.title,
         handle: node.handle,
         description: node.description,
-        body_html: node.body_html, // AÑADIDO PARA TENER MÁS INFO
+        
+        // Mapeamos descriptionHtml a body_html para mantener compatibilidad con tu código de limpieza
+        body_html: node.descriptionHtml, 
+        
         productType: node.productType,
         price: node.variants.edges[0]?.node.price || "Consultar",
         tags: node.tags,
@@ -202,17 +214,28 @@ function buildAIText(product) {
 
 async function loadIndexes() {
   // 1. Productos
+  // En producción (Render), el sistema de archivos es efímero. 
+  // Siempre intentamos cargar de disco primero por si reiniciamos rápido, 
+  // pero si falla, descargamos de nuevo.
   if (fs.existsSync(INDEX_FILE)) {
     console.log("📦 Cargando productos desde caché...");
-    aiIndex = JSON.parse(fs.readFileSync(INDEX_FILE, "utf8"));
-  } else {
+    try {
+        aiIndex = JSON.parse(fs.readFileSync(INDEX_FILE, "utf8"));
+    } catch (e) {
+        console.log("⚠️ Error leyendo caché, reindexando...");
+        aiIndex = [];
+    }
+  } 
+  
+  if (aiIndex.length === 0) {
     console.log("🤖 Indexando productos en Shopify (esto puede tardar)...");
     const products = await getAllProducts();
     for (const p of products) {
       const emb = await openai.embeddings.create({ model: "text-embedding-3-large", input: buildAIText(p) });
       aiIndex.push({ ...p, embedding: emb.data[0].embedding });
     }
-    fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex));
+    // Intentamos guardar en disco (aunque en Render se borrará al redesplegar)
+    try { fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex)); } catch(e) {}
   }
   console.log(`✅ Productos listos: ${aiIndex.length}`);
 
