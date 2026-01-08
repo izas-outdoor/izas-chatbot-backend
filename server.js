@@ -153,11 +153,11 @@ async function getAllProducts() {
 
   while (hasNextPage) {
     const data = await fetchGraphQL(query, { cursor });
-    
+
     // Si hay error en la query, data será null y romperá aquí.
     if (!data || !data.products) {
-        console.error("❌ Error grave recuperando productos. Revisa los permisos de Shopify.");
-        break;
+      console.error("❌ Error grave recuperando productos. Revisa los permisos de Shopify.");
+      break;
     }
 
     const edges = data.products.edges;
@@ -177,10 +177,10 @@ async function getAllProducts() {
         title: node.title,
         handle: node.handle,
         description: node.description,
-        
+
         // Mapeamos descriptionHtml a body_html para mantener compatibilidad con tu código de limpieza
-        body_html: node.descriptionHtml, 
-        
+        body_html: node.descriptionHtml,
+
         productType: node.productType,
         price: node.variants.edges[0]?.node.price || "Consultar",
         tags: node.tags,
@@ -202,6 +202,100 @@ async function getAllProducts() {
   return products;
 }
 
+/* ---------------- ORDER HELPER CON CORRECCIÓN DE LINKS ---------------- */
+async function getOrderStatus(orderId, userEmail) {
+  const cleanId = orderId.replace("#", "").trim();
+  
+  const query = `
+    query getOrder($query: String!) {
+      orders(first: 1, query: $query) {
+        nodes {
+          name
+          email
+          displayFulfillmentStatus
+          
+          totalPriceSet {
+            shopMoney {
+              amount
+              currencyCode
+            }
+          }
+          
+          fulfillments(first: 3) {
+            trackingInfo(first: 1) {
+              number
+              url
+              company
+            }
+          }
+          
+          lineItems(first: 5) {
+            edges {
+              node {
+                title
+                quantity
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  try {
+    const data = await fetchGraphQL(query, { query: `name:${cleanId}` });
+    
+    if (!data || !data.orders || data.orders.nodes.length === 0) {
+      return { found: false, reason: "not_found" };
+    }
+
+    const order = data.orders.nodes[0];
+
+    if (order.email.toLowerCase().trim() !== userEmail.toLowerCase().trim()) {
+      return { found: false, reason: "email_mismatch" };
+    }
+
+    const tracking = order.fulfillments[0]?.trackingInfo[0];
+    const items = order.lineItems.edges.map(e => `${e.node.quantity}x ${e.node.title}`).join(", ");
+    const price = order.totalPriceSet?.shopMoney?.amount || "";
+
+    // --- LOGICA DE TRANSPORTISTAS Y LINKS ---
+    let carrierName = tracking?.company || "Empresa de transporte";
+    let finalTrackingUrl = tracking?.url || null; // Por defecto, usamos el de Shopify
+
+    // 1. Correos Express
+    if (carrierName === "0002") {
+        carrierName = "Correos Express";
+    }
+
+    // 2. DHL (Corrección de nombre y LINK)
+    if (carrierName === "0003") {
+        carrierName = "DHL";
+        // Si tenemos el número, forzamos el enlace oficial de DHL España
+        if (tracking?.number) {
+            finalTrackingUrl = `https://www.dhl.com/es-es/home/tracking.html?tracking-id=${tracking.number}&submit=1`;
+        }
+    }
+
+    return {
+      found: true,
+      data: {
+        id: order.name,
+        status: order.displayFulfillmentStatus,
+        trackingNumber: tracking?.number || "No disponible aún",
+        trackingUrl: finalTrackingUrl, // <--- Usamos nuestra URL corregida
+        carrier: carrierName, 
+        items: items,
+        price: price
+      }
+    };
+
+  } catch (error) {
+    console.error("❌ Error buscando pedido:", error);
+    return { found: false, reason: "error" };
+  }
+}
+
 /* ---------------- AI INDEX ---------------- */
 let aiIndex = [];
 let faqIndex = [];
@@ -220,13 +314,13 @@ async function loadIndexes() {
   if (fs.existsSync(INDEX_FILE)) {
     console.log("📦 Cargando productos desde caché...");
     try {
-        aiIndex = JSON.parse(fs.readFileSync(INDEX_FILE, "utf8"));
+      aiIndex = JSON.parse(fs.readFileSync(INDEX_FILE, "utf8"));
     } catch (e) {
-        console.log("⚠️ Error leyendo caché, reindexando...");
-        aiIndex = [];
+      console.log("⚠️ Error leyendo caché, reindexando...");
+      aiIndex = [];
     }
-  } 
-  
+  }
+
   if (aiIndex.length === 0) {
     console.log("🤖 Indexando productos en Shopify (esto puede tardar)...");
     const products = await getAllProducts();
@@ -235,7 +329,7 @@ async function loadIndexes() {
       aiIndex.push({ ...p, embedding: emb.data[0].embedding });
     }
     // Intentamos guardar en disco (aunque en Render se borrará al redesplegar)
-    try { fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex)); } catch(e) {}
+    try { fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex)); } catch (e) { }
   }
   console.log(`✅ Productos listos: ${aiIndex.length}`);
 
@@ -270,7 +364,7 @@ async function refineQuery(userQuery, history) {
         3. Si el usuario dice solo colores (ej: "están en negro y rosa"), asume que se refiere al producto anterior y genera: "chaqueta [Nombre] color negro y rosa".
         `
       },
-      ...history.slice(-4), 
+      ...history.slice(-4),
       { role: "user", content: userQuery }
     ],
     temperature: 0
@@ -281,7 +375,7 @@ async function refineQuery(userQuery, history) {
 /* ---------------- Similarity ---------------- */
 
 function cosineSimilarity(a, b) {
-  return a.reduce((acc, val, i) => acc + val * b[i], 0); 
+  return a.reduce((acc, val, i) => acc + val * b[i], 0);
 }
 
 // --- LIMPIEZA DE TEXTO (NUEVO) ---
@@ -294,62 +388,100 @@ function cleanText(text) {
     .substring(0, 600);         // Limita longitud
 }
 
-/* --- ENDPOINT PRINCIPAL (MODIFICADO CON MEMORIA VISUAL) --- */
+/* --- ENDPOINT PRINCIPAL (CEREBRO TOTAL - VERSIÓN AMABLE) --- */
 app.post("/api/ai/search", async (req, res) => {
-  const { q, history, visible_ids } = req.body; // <--- ACEPTAMOS visible_ids
+  const { q, history, visible_ids } = req.body;
   if (!q) return res.status(400).json({ error: "Falta query" });
 
   try {
-    const optimizedQuery = await refineQuery(q, history || []);
+    // ---------------------------------------------------------
+    // 1. DETECCIÓN INTELIGENTE DE PEDIDOS
+    // ---------------------------------------------------------
+    
+    // A) Buscamos PRIMERO en el mensaje actual (q)
+    let emailMatch = q.match(/[\w.-]+@[\w.-]+\.\w+/);
+    let orderMatch = q.match(/#?(\d{4,})/); 
 
+    // B) Si falta algo, buscamos en el historial RECIENTE
+    if ((!emailMatch || !orderMatch) && history) {
+        const reversedHistory = [...history].reverse(); 
+        const historyText = reversedHistory.map(h => h.content).join(" ");
+        
+        if (!emailMatch) emailMatch = historyText.match(/[\w.-]+@[\w.-]+\.\w+/);
+        if (!orderMatch) orderMatch = historyText.match(/#?(\d{4,})/);
+    }
+
+    let orderData = null;
+
+    // Si tenemos ambos datos, ejecutamos la búsqueda
+    if (orderMatch && emailMatch) {
+        const orderId = orderMatch[1];
+        const email = emailMatch[0];
+        console.log(`🔎 Buscando pedido ${orderId} para ${email}...`);
+        
+        const result = await getOrderStatus(orderId, email);
+        
+        if (result.found) {
+            orderData = `
+            [DATOS_ENCONTRADOS]
+            ID: ${result.data.id}
+            ESTADO_RAW: ${result.data.status}
+            TRACKING: ${result.data.trackingNumber}
+            LINK: ${result.data.trackingUrl || "No disponible"}
+            CARRIER: ${result.data.carrier}
+            ITEMS: ${result.data.items}
+            PRECIO: ${result.data.price}
+            `;
+        } else if (result.reason === "email_mismatch") {
+            orderData = "❌ ERROR SEGURIDAD: El email no coincide con el del pedido.";
+        } else {
+            orderData = "❌ ERROR: No existe ningún pedido con ese número.";
+        }
+    }
+
+    // ---------------------------------------------------------
+    // 2. PREPARACIÓN DE BÚSQUEDA DE PRODUCTOS
+    // ---------------------------------------------------------
+    
+    const optimizedQuery = await refineQuery(q, history || []);
     if (aiIndex.length === 0) await loadIndexes();
 
-    // 1. RECUPERAR PRODUCTOS VISIBLES (MEMORIA VISUAL)
+    // A) Recuperar productos que ya están en pantalla
     let contextProducts = [];
     if (visible_ids && visible_ids.length > 0) {
       contextProducts = aiIndex.filter(p => visible_ids.map(String).includes(String(p.id)));
     }
 
-    // 2. EMBEDDING
+    // B) Buscar nuevos candidatos
     const embResponse = await openai.embeddings.create({ model: "text-embedding-3-large", input: optimizedQuery });
     const vector = embResponse.data[0].embedding;
 
-    // 3. BÚSQUEDA VECTORIAL (NUEVOS CANDIDATOS)
     const searchResults = aiIndex
       .map(p => ({ ...p, score: cosineSimilarity(vector, p.embedding) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 8);
 
-    // 4. COMBINAR: PRIORIDAD A LO VISIBLE
-    const combinedCandidates = new Map();
-
-    // Primero añadimos los que ya está viendo (Contexto fuerte)
-    contextProducts.forEach(p => combinedCandidates.set(String(p.id), p));
-
-    // Luego rellenamos con la búsqueda nueva hasta tener máx 10
-    searchResults.forEach(p => {
-      if (combinedCandidates.size < 10) {
-        combinedCandidates.set(String(p.id), p);
-      }
-    });
-
-    const finalCandidatesList = Array.from(combinedCandidates.values());
-
-    // 5. FAQs
     const faqResults = faqIndex
       .map(f => ({ ...f, score: cosineSimilarity(vector, f.embedding) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 2);
 
-    // 6. PREPARACIÓN DE CONTEXTO (Usando cleanText y marcando visibles)
+    // C) Combinar
+    const combinedCandidates = new Map();
+    contextProducts.forEach(p => combinedCandidates.set(String(p.id), p));
+    searchResults.forEach(p => { 
+        if (combinedCandidates.size < 10) combinedCandidates.set(String(p.id), p); 
+    });
+    
+    const finalCandidatesList = Array.from(combinedCandidates.values());
+
+    // D) Contexto para IA
     const productsContext = finalCandidatesList.map(p => {
         const colorOption = p.options ? p.options.find(o => o.name.match(/color|cor/i)) : null;
         const officialColors = colorOption ? colorOption.values.join(", ") : "Único";
         const cleanDescription = cleanText(p.body_html || p.description);
-        const cleanSpecs = p.metafields ? JSON.stringify(p.metafields) : "Sin especificaciones";
         
-        // Marcamos si el producto está visible actualmente para que la IA lo sepa
-        const isVisible = visible_ids && visible_ids.map(String).includes(String(p.id)) ? "(EN PANTALLA)" : "";
+        const isVisible = visible_ids && visible_ids.map(String).includes(String(p.id)) ? "(EN PANTALLA - PRIORIDAD PARA COMPARAR)" : "";
 
         return `
         PRODUCTO ${isVisible}:
@@ -357,51 +489,60 @@ app.post("/api/ai/search", async (req, res) => {
         - Título: ${p.title}
         - Precio: ${p.price} €
         - Colores: ${officialColors}
-        - Descripción: ${cleanDescription}
-        - Specs: ${cleanSpecs}
+        - Detalles Técnicos: ${cleanDescription}
+        - Specs: ${JSON.stringify(p.metafields)}
         `;
     }).join("\n\n");
 
-    // 7. IA CEREBRO TOTAL
+    // ---------------------------------------------------------
+    // 3. CEREBRO IA (PROMPT ACTUALIZADO)
+    // ---------------------------------------------------------
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       response_format: { type: "json_object" },
       messages: [
         {
           role: "system",
-          content: `Eres un asistente experto de Izas.
-              
-              CONTEXTO ACTUAL:
-              El usuario está viendo estos productos: ${visible_ids ? visible_ids.length : 0} productos.
-              Si te pide "diferencias", "cuál es mejor" o detalles, REFIÉRETE PRINCIPALMENTE A LOS PRODUCTOS MARCADOS COMO "(EN PANTALLA)" en la lista de abajo, a menos que la pregunta sea claramente una búsqueda nueva.
-
-              TU MISIÓN:
-              Analiza la intención. Decide si busca PRODUCTOS (Escaparate) o INFORMACIÓN (Detalles/Comparar).
+          content: `Eres Sazi, asistente experto de Izas Outdoor.
 
               MODO A: ESCAPARATE / BUSCADOR
-              (Ej: "Quiero chaqueta", "Enséñame algo para hombre")
-              - JSON "reply": Frase de introducción breve con nombres de productos.
-              - JSON "products": [Lista de IDs].
-              - PROHIBIDO EN MODO A: No pongas precios ni specs en el texto.
+              - JSON "reply": Breve introducción.
+              - JSON "products": [IDs encontrados].
 
-              MODO B: INFORMACIÓN / DETALLES / PRECIOS
-              (Ej: "¿Cuánto cuesta?", "¿Qué colores tiene?", "¿Diferencias?", "¿Cuál es mejor?")
-              - JSON "reply": Responde a la pregunta exacta usando los datos de abajo. Si compara, usa las descripciones y specs.
-              - JSON "products": [] (Vacío, para no repetir tarjetas).
-              - REGLA: Si pregunta PRECIO o COLORES, DILO.
+              MODO B: COMPARACIÓN / DETALLES
+              - Lee "PRODUCTOS DISPONIBLES".
+              - JSON "reply": Explicación detallada.
+              - JSON "products": [].
+
+              MODO C: RASTREO DE PEDIDOS
+              - Si el usuario pregunta por un pedido:
+                1. ANALIZA "DATOS PEDIDO LIVE":
+                   - Si contiene "[DATOS_ENCONTRADOS]", USA ESTE FORMATO:
+                     "Aquí tienes la información de tu pedido [ID]:
+                     
+                     - **Estado:** [Traduce: FULFILLED->"Enviado 🚚" / UNFULFILLED->"En preparación 📦"]
+                     - **Transportista:** [CARRIER]
+                     - **Tracking:** [TRACKING]
+                     - **Enlace:** <a href='[LINK]' target='_blank'>Haz clic para seguimiento</a>
+                     - **Artículos:** [ITEMS]"
+
+                2. Si "DATOS PEDIDO LIVE" indica error o falta de datos:
+                   - PROHIBIDO decir frases vagas como "necesito ambos datos".
+                   - DI SIEMPRE LA FRASE COMPLETA: "Por motivos de seguridad, para consultar el estado necesito que me indiques tu número de pedido y el email de compra."
+                   - Si ya tienes uno de los dos datos, pide educadamente el que falta por su nombre (ej: "Genial, ya tengo el número. Ahora necesito tu email para confirmarlo").
+
+              --- DATOS ---
+
+              DATOS PEDIDO LIVE:
+              ${orderData || "No se ha realizado búsqueda (faltan datos)."}
+
+              FAQs:
+              ${faqResults.map(f => `P:${f.question} R:${f.answer}`).join("\n")}
               
-              Responde SOLO JSON:
-              {
-                "reply": "Texto...",
-                "products": [ { "id": "ID" } ]
-              }
-              
-              CONTEXTO FAQs:
-              ${faqResults.map(f => `- P: ${f.question} | R: ${f.answer}`).join("\n")}
-              
-              CANDIDATOS PRODUCTOS (Data Source):
+              PRODUCTOS DISPONIBLES:
               ${productsContext}
-              `
+
+              Responde JSON: { "reply": "...", "products": [...] }`
         },
         ...history.slice(-2).map(m => ({ role: m.role, content: m.content })),
         { role: "user", content: q }
@@ -410,35 +551,26 @@ app.post("/api/ai/search", async (req, res) => {
 
     const aiContent = JSON.parse(completion.choices[0].message.content);
 
-    // 8. PROCESAMIENTO ROBUSTO DE IDs (Soporta strings y objetos)
-    const seenIds = new Set(); 
-
+    // ---------------------------------------------------------
+    // 4. PROCESADO DE RESPUESTA
+    // ---------------------------------------------------------
+    const seenIds = new Set();
     const finalProducts = (aiContent.products || []).map(aiProd => {
-      // Manejamos si la IA devuelve ID directo o objeto {id: ...}
       const targetId = typeof aiProd === 'object' ? aiProd.id : aiProd;
-      
       const original = finalCandidatesList.find(p => String(p.id) === String(targetId));
-
       if (!original || seenIds.has(original.id)) return null;
-
       seenIds.add(original.id);
-
+      
       let displayImage = original.image;
       let displayUrlParams = "";
-
       if (typeof aiProd === 'object' && aiProd.variant_id && original.variants) {
-        const variantData = original.variants.find(v => String(v.id) === String(aiProd.variant_id));
-        if (variantData) {
-          if (variantData.image) displayImage = variantData.image;
-          displayUrlParams = `?variant=${variantData.id}`;
-        }
+         const v = original.variants.find(v => String(v.id) === String(aiProd.variant_id));
+         if(v) { 
+             if(v.image) displayImage = v.image; 
+             displayUrlParams=`?variant=${v.id}`; 
+         }
       }
-
-      return {
-        ...original,
-        displayImage,
-        displayUrlParams
-      };
+      return { ...original, displayImage, displayUrlParams };
     }).filter(Boolean);
 
     res.json({ products: finalProducts, text: aiContent.reply });
