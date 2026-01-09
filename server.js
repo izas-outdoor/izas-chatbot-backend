@@ -5,9 +5,32 @@ import OpenAI from "openai";
 import fs from "fs";
 import cors from "cors";
 import { COLOR_CONCEPTS, CONCEPTS } from "./concepts.js";
+import { createClient } from "@supabase/supabase-js";
 
+/* --- INFORMACIÓN DE MARCA (CEREBRO FIJO) --- */
+/* --- INFORMACIÓN DE MARCA (CEREBRO FIJO) --- */
+const BRAND_INFO = `
+SOBRE IZAS OUTDOOR:
+Somos una marca especializada en ropa de montaña, trekking y outdoor.
+Nuestra filosofía es ofrecer la máxima calidad y tecnología a precios accesibles.
+
+TECNOLOGÍAS CLAVE:
+- Mount-Loft: Fibras ultraligeras con propiedades térmicas similares a la pluma, pero resistentes al agua.
+- AWPS (All Weather Protection System): Membranas cortavientos e impermeables transpirables.
+- Dry: Tejidos que expulsan el sudor y secan rápido.
+- Softshell: Tejido tricapa que combina capa exterior repelente, membrana cortavientos e interior térmico.
+
+DISTRIBUCIÓN Y VENTA:
+- Vendemos principalmente en nuestra web oficial (donde está todo el catálogo y mejores ofertas).
+- También tenemos presencia en Marketplaces como Decathlon, Amazon, Sprinter y El Corte Inglés.
+- Tiendas físicas propias y distribuidores autorizados.
+
+CALIDAD:
+Usamos costuras termoselladas en prendas impermeables y patrones ergonómicos para la libertad de movimiento.
+`;
 const app = express();
 const PORT = process.env.PORT || 3000;
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 app.use(cors({
   origin: "*", // en producción lo cerramos
@@ -205,7 +228,7 @@ async function getAllProducts() {
 /* ---------------- ORDER HELPER CON CORRECCIÓN DE LINKS ---------------- */
 async function getOrderStatus(orderId, userEmail) {
   const cleanId = orderId.replace("#", "").trim();
-  
+
   const query = `
     query getOrder($query: String!) {
       orders(first: 1, query: $query) {
@@ -244,7 +267,7 @@ async function getOrderStatus(orderId, userEmail) {
 
   try {
     const data = await fetchGraphQL(query, { query: `name:${cleanId}` });
-    
+
     if (!data || !data.orders || data.orders.nodes.length === 0) {
       return { found: false, reason: "not_found" };
     }
@@ -265,16 +288,16 @@ async function getOrderStatus(orderId, userEmail) {
 
     // 1. Correos Express
     if (carrierName === "0002") {
-        carrierName = "Correos Express";
+      carrierName = "Correos Express";
     }
 
     // 2. DHL (Corrección de nombre y LINK)
     if (carrierName === "0003") {
-        carrierName = "DHL";
-        // Si tenemos el número, forzamos el enlace oficial de DHL España
-        if (tracking?.number) {
-            finalTrackingUrl = `https://www.dhl.com/es-es/home/tracking.html?tracking-id=${tracking.number}&submit=1`;
-        }
+      carrierName = "DHL";
+      // Si tenemos el número, forzamos el enlace oficial de DHL España
+      if (tracking?.number) {
+        finalTrackingUrl = `https://www.dhl.com/es-es/home/tracking.html?tracking-id=${tracking.number}&submit=1`;
+      }
     }
 
     return {
@@ -284,7 +307,7 @@ async function getOrderStatus(orderId, userEmail) {
         status: order.displayFulfillmentStatus,
         trackingNumber: tracking?.number || "No disponible aún",
         trackingUrl: finalTrackingUrl, // <--- Usamos nuestra URL corregida
-        carrier: carrierName, 
+        carrier: carrierName,
         items: items,
         price: price
       }
@@ -388,50 +411,41 @@ function cleanText(text) {
     .substring(0, 600);         // Limita longitud
 }
 
-/* --- ENDPOINT PRINCIPAL (CEREBRO TOTAL - VERSIÓN AMABLE) --- */
+/* --- ENDPOINT PRINCIPAL (CEREBRO TOTAL + LOGS AGRUPADOS) --- */
 app.post("/api/ai/search", async (req, res) => {
-  const { q, history, visible_ids } = req.body;
+  const { q, history, visible_ids, session_id } = req.body;
   if (!q) return res.status(400).json({ error: "Falta query" });
 
   try {
     // ---------------------------------------------------------
     // 1. DETECCIÓN INTELIGENTE DE PEDIDOS
     // ---------------------------------------------------------
-    
-    // A) Buscamos PRIMERO en el mensaje actual (q)
     let emailMatch = q.match(/[\w.-]+@[\w.-]+\.\w+/);
     let orderMatch = q.match(/#?(\d{4,})/); 
 
-    // B) Si falta algo, buscamos en el historial RECIENTE
     if ((!emailMatch || !orderMatch) && history) {
         const reversedHistory = [...history].reverse(); 
         const historyText = reversedHistory.map(h => h.content).join(" ");
-        
         if (!emailMatch) emailMatch = historyText.match(/[\w.-]+@[\w.-]+\.\w+/);
         if (!orderMatch) orderMatch = historyText.match(/#?(\d{4,})/);
     }
 
     let orderData = null;
-
-    // Si tenemos ambos datos, ejecutamos la búsqueda
     if (orderMatch && emailMatch) {
         const orderId = orderMatch[1];
         const email = emailMatch[0];
         console.log(`🔎 Buscando pedido ${orderId} para ${email}...`);
         
         const result = await getOrderStatus(orderId, email);
-        
         if (result.found) {
-            orderData = `
-            [DATOS_ENCONTRADOS]
+            orderData = `[DATOS_ENCONTRADOS]
             ID: ${result.data.id}
             ESTADO_RAW: ${result.data.status}
             TRACKING: ${result.data.trackingNumber}
             LINK: ${result.data.trackingUrl || "No disponible"}
             CARRIER: ${result.data.carrier}
             ITEMS: ${result.data.items}
-            PRECIO: ${result.data.price}
-            `;
+            PRECIO: ${result.data.price}`;
         } else if (result.reason === "email_mismatch") {
             orderData = "❌ ERROR SEGURIDAD: El email no coincide con el del pedido.";
         } else {
@@ -442,17 +456,14 @@ app.post("/api/ai/search", async (req, res) => {
     // ---------------------------------------------------------
     // 2. PREPARACIÓN DE BÚSQUEDA DE PRODUCTOS
     // ---------------------------------------------------------
-    
     const optimizedQuery = await refineQuery(q, history || []);
     if (aiIndex.length === 0) await loadIndexes();
 
-    // A) Recuperar productos que ya están en pantalla
     let contextProducts = [];
     if (visible_ids && visible_ids.length > 0) {
       contextProducts = aiIndex.filter(p => visible_ids.map(String).includes(String(p.id)));
     }
 
-    // B) Buscar nuevos candidatos
     const embResponse = await openai.embeddings.create({ model: "text-embedding-3-large", input: optimizedQuery });
     const vector = embResponse.data[0].embedding;
 
@@ -466,36 +477,31 @@ app.post("/api/ai/search", async (req, res) => {
       .sort((a, b) => b.score - a.score)
       .slice(0, 2);
 
-    // C) Combinar
     const combinedCandidates = new Map();
     contextProducts.forEach(p => combinedCandidates.set(String(p.id), p));
     searchResults.forEach(p => { 
         if (combinedCandidates.size < 10) combinedCandidates.set(String(p.id), p); 
     });
-    
     const finalCandidatesList = Array.from(combinedCandidates.values());
 
-    // D) Contexto para IA
     const productsContext = finalCandidatesList.map(p => {
         const colorOption = p.options ? p.options.find(o => o.name.match(/color|cor/i)) : null;
         const officialColors = colorOption ? colorOption.values.join(", ") : "Único";
         const cleanDescription = cleanText(p.body_html || p.description);
         
-        const isVisible = visible_ids && visible_ids.map(String).includes(String(p.id)) ? "(EN PANTALLA - PRIORIDAD PARA COMPARAR)" : "";
+        const isVisible = visible_ids && visible_ids.map(String).includes(String(p.id)) ? "(EN PANTALLA - USUARIO LO ESTÁ VIENDO)" : "";
 
-        return `
-        PRODUCTO ${isVisible}:
+        return `PRODUCTO ${isVisible}:
         - ID: ${p.id}
         - Título: ${p.title}
         - Precio: ${p.price} €
         - Colores: ${officialColors}
-        - Detalles Técnicos: ${cleanDescription}
-        - Specs: ${JSON.stringify(p.metafields)}
-        `;
+        - Descripción: ${cleanDescription}
+        - Specs: ${JSON.stringify(p.metafields)}`;
     }).join("\n\n");
 
     // ---------------------------------------------------------
-    // 3. CEREBRO IA (PROMPT ACTUALIZADO)
+    // 3. CEREBRO IA (PROMPT CORREGIDO)
     // ---------------------------------------------------------
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -503,38 +509,48 @@ app.post("/api/ai/search", async (req, res) => {
       messages: [
         {
           role: "system",
-          content: `Eres Sazi, asistente experto de Izas Outdoor.
+          content: `Eres Sazi, el asistente virtual oficial de Izas Outdoor. Tu tono es cercano, profesional y aventurero.
+
+              ⛔ REGLAS DE SEGURIDAD (IMPORTANTE):
+              1. COMPETENCIA Y CANALES DE VENTA:
+                 - COMPARACIONES: No compares productos con otras marcas (Trango, North Face, etc.).Decathlon, Sprinter, Amazon y El Corte Inglés no es competencia directa, son distribuidores.
+                 - CANALES DE VENTA (Decathlon, Amazon...): SI PREGUNTAN SI VENDEMOS ALLÍ: No mientas. Di: "Sí, colaboramos con partners como Decathlon o Amazon, pero te recomiendo comprar aquí en nuestra web oficial para acceder a todo el catálogo, ofertas exclusivas y garantía directa."
+
+              2. CONOCIMIENTO:
+                 - Usa "PRODUCTOS DISPONIBLES" para respuestas concretas.
+                 - Usa "DATOS DE MARCA" (abajo) para hablar de calidad general o tecnologías.
+                 - Si no sabes algo, di: "No tengo ese dato ahora mismo".
+
+              --- MODOS DE RESPUESTA ---
 
               MODO A: ESCAPARATE / BUSCADOR
-              - JSON "reply": Breve introducción.
+              - JSON "reply": Vende el producto. "Esta es nuestra mejor opción...".
               - JSON "products": [IDs encontrados].
 
               MODO B: COMPARACIÓN / DETALLES
-              - Lee "PRODUCTOS DISPONIBLES".
-              - JSON "reply": Explicación detallada.
-              - JSON "products": [].
+              - Explica usando los datos técnicos.
 
               MODO C: RASTREO DE PEDIDOS
-              - Si el usuario pregunta por un pedido:
-                1. ANALIZA "DATOS PEDIDO LIVE":
-                   - Si contiene "[DATOS_ENCONTRADOS]", USA ESTE FORMATO:
-                     "Aquí tienes la información de tu pedido [ID]:
-                     
-                     - **Estado:** [Traduce: FULFILLED->"Enviado 🚚" / UNFULFILLED->"En preparación 📦"]
-                     - **Transportista:** [CARRIER]
-                     - **Tracking:** [TRACKING]
-                     - **Enlace:** <a href='[LINK]' target='_blank'>Haz clic para seguimiento</a>
-                     - **Artículos:** [ITEMS]"
+              - Si ves "[DATOS_ENCONTRADOS]", USA ESTRICTAMENTE ESTA PLANTILLA VISUAL:
+                "📋 **Estado del pedido [ID]:**
+                
+                • **Estado:** [Traduce: FULFILLED->"✅ Enviado / Completado" | UNFULFILLED->"📦 En preparación"]
+                • **Transportista:** [CARRIER]
+                • **Tracking:** [TRACKING]
+                • **Enlace:** <a href='[LINK]' target='_blank'>Pincha aquí para ver dónde está</a>
+                • **Artículos:** [ITEMS]"
 
-                2. Si "DATOS PEDIDO LIVE" indica error o falta de datos:
-                   - PROHIBIDO decir frases vagas como "necesito ambos datos".
-                   - DI SIEMPRE LA FRASE COMPLETA: "Por motivos de seguridad, para consultar el estado necesito que me indiques tu número de pedido y el email de compra."
-                   - Si ya tienes uno de los dos datos, pide educadamente el que falta por su nombre (ej: "Genial, ya tengo el número. Ahora necesito tu email para confirmarlo").
+                (Nota: Si [LINK] es "No disponible", NO pongas la línea del enlace).
+
+              - Si faltan datos: "Por motivos de seguridad, para consultar el estado necesito que me indiques tu número de pedido y el email de compra."
 
               --- DATOS ---
 
               DATOS PEDIDO LIVE:
-              ${orderData || "No se ha realizado búsqueda (faltan datos)."}
+              ${orderData || "N/A"}
+
+              DATOS DE MARCA (Calidad/Tecnología/Distribución):
+              ${BRAND_INFO}
 
               FAQs:
               ${faqResults.map(f => `P:${f.question} R:${f.answer}`).join("\n")}
@@ -542,7 +558,9 @@ app.post("/api/ai/search", async (req, res) => {
               PRODUCTOS DISPONIBLES:
               ${productsContext}
 
-              Responde JSON: { "reply": "...", "products": [...] }`
+              Responde JSON: { "reply": "...", "products": [...], "category": "ETIQUETA" }
+              Etiquetas: LOGISTICA, PRODUCTO, COMPARATIVA, ATENCION_CLIENTE, OTRO.
+              `
         },
         ...history.slice(-2).map(m => ({ role: m.role, content: m.content })),
         { role: "user", content: q }
@@ -565,13 +583,30 @@ app.post("/api/ai/search", async (req, res) => {
       let displayUrlParams = "";
       if (typeof aiProd === 'object' && aiProd.variant_id && original.variants) {
          const v = original.variants.find(v => String(v.id) === String(aiProd.variant_id));
-         if(v) { 
-             if(v.image) displayImage = v.image; 
-             displayUrlParams=`?variant=${v.id}`; 
-         }
+         if(v) { if(v.image) displayImage = v.image; displayUrlParams=`?variant=${v.id}`; }
       }
       return { ...original, displayImage, displayUrlParams };
     }).filter(Boolean);
+
+    // ---------------------------------------------------------
+    // 5. GUARDADO EN SUPABASE
+    // ---------------------------------------------------------
+    const currentSessionId = session_id || "anonimo";
+    const newInteraction = [
+        { role: "user", content: q, timestamp: new Date() },
+        { role: "assistant", content: aiContent.reply, timestamp: new Date() }
+    ];
+    const fullHistoryToSave = [...(history || []), ...newInteraction];
+
+    supabase.from('chat_sessions').upsert({
+        session_id: currentSessionId,
+        conversation: fullHistoryToSave,
+        category: aiContent.category || "GENERAL",
+        updated_at: new Date()
+    }, { onConflict: 'session_id' })
+    .then(({ error }) => {
+        if (error) console.error("❌ Error Supabase:", error);
+    });
 
     res.json({ products: finalProducts, text: aiContent.reply });
 
