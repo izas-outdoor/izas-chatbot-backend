@@ -2,7 +2,7 @@
   {
     "id": "plazo_devolucion",
     "question": "¿Cuál es el plazo para hacer cambios o devoluciones?",
-    "answer": "El plazo es de 30 días desde la recepción del pedido. En campañas especiales como Black Friday o Rebajas, el plazo se amplía a 60 días."
+    "answer": "El plazo es de 30 días desde la recepción del pedido. En campañas especiales como Black Friday o Rebajas, el plazo puede ser ampliado a 60 días."
   },
   {
     "id": "como_devolver",
@@ -84,4 +84,5 @@
     "question": "No estaba en casa y han dejado el paquete en un punto de recogida",
     "answer": "Si no estabas, el transportista puede dejarlo en un punto cercano para agilizar. Si necesitas entrega en domicilio obligatoria, escríbenos a info@izas-outdoor.com para intentar reprogramarlo."
   }
+
 ]
