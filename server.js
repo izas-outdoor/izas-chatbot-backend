@@ -146,32 +146,48 @@ async function getAllProducts() {
   const products = [];
 
   const query = `
-    query getProducts($cursor: String) {
-      products(first: 50, after: $cursor, query: "status:active") {
-        pageInfo { hasNextPage }
-        edges {
-          cursor
-          node {
-            id title description productType tags handle
-            images(first: 1) { edges { node { url } } }
-            
-            # --- CORRECCIÓN AQUÍ: Usamos descriptionHtml en lugar de body_html ---
-            descriptionHtml 
-            
-            # --- RECUPERAMOS LAS OPCIONES (Aquí están los colores limpios) ---
-            options {
-              name
-              values
-            }
-            
-            variants(first: 50) {
-              edges { node { id title price image { url } } }
-            }
-            metafields(first: 20) { edges { node { namespace key value } } }
+  query getProducts($cursor: String) {
+    products(first: 50, after: $cursor, query: "status:active") {
+      pageInfo { hasNextPage }
+      edges {
+        cursor
+        node {
+          id 
+          title 
+          description 
+          productType 
+          tags 
+          handle
+          images(first: 1) { edges { node { url } } }
+          descriptionHtml 
+          
+          # Opciones generales del producto (ej: ["Color", "Talla"])
+          options {
+            name
+            values
           }
+          
+          # --- DATOS EN TIEMPO REAL: Tallas, Colores, Stock y Precio ---
+          variants(first: 50) {
+            edges {
+              node {
+                title
+                price # <-- NUEVO: Precio de esta talla/color
+                availableForSale
+                inventoryQuantity
+                selectedOptions { # <-- NUEVO: Separa limpiamente el color y la talla
+                  name
+                  value
+                }
+              }
+            }
+          }
+          
+          metafields(first: 20) { edges { node { namespace key value } } }
         }
       }
     }
+  }
   `;
 
   while (hasNextPage) {
@@ -410,6 +426,44 @@ function cleanText(text) {
     .trim()
     .substring(0, 600);         // Limita longitud
 }
+// Función para convertir las variantes de Shopify a texto para la IA
+function formatStockForAI(variantsEdges) {
+    if (!variantsEdges || variantsEdges.length === 0) return "Sin información de stock.";
+
+    let stockInfo = "STOCK Y PRECIOS ACTUALES:\n";
+
+    variantsEdges.forEach(edge => {
+        const variant = edge.node;
+        const price = variant.price;
+        const qty = variant.inventoryQuantity;
+        const isAvailable = variant.availableForSale;
+
+        // Extraemos Color y Talla limpiamente
+        let color = "";
+        let size = "";
+        
+        variant.selectedOptions.forEach(opt => {
+            if (opt.name.toLowerCase() === "color") color = opt.value;
+            if (opt.name.toLowerCase().includes("talla") || opt.name.toLowerCase() === "size") size = opt.value;
+        });
+
+        // Si no detecta opciones separadas, usa el título por defecto (ej: "Rojo / M")
+        const variantName = (color && size) ? `${color} - Talla ${size}` : variant.title;
+
+        // Determinamos el estado del stock
+        let status = "";
+        if (isAvailable && qty > 0) {
+            status = qty <= 2 ? `🟢 ¡SOLO QUEDAN ${qty} UNIDADES!` : `🟢 ${qty} en stock`;
+        } else {
+            status = "🔴 AGOTADO";
+        }
+
+        // Añadimos la línea al resumen
+        stockInfo += `- ${variantName}: ${status} (${price}€)\n`;
+    });
+
+    return stockInfo;
+}
 
 /* --- ENDPOINT PRINCIPAL (CEREBRO TOTAL + LOGS AGRUPADOS) --- */
 app.post("/api/ai/search", async (req, res) => {
@@ -421,24 +475,24 @@ app.post("/api/ai/search", async (req, res) => {
     // 1. DETECCIÓN INTELIGENTE DE PEDIDOS
     // ---------------------------------------------------------
     let emailMatch = q.match(/[\w.-]+@[\w.-]+\.\w+/);
-    let orderMatch = q.match(/#?(\d{4,})/); 
+    let orderMatch = q.match(/#?(\d{4,})/);
 
     if ((!emailMatch || !orderMatch) && history) {
-        const reversedHistory = [...history].reverse(); 
-        const historyText = reversedHistory.map(h => h.content).join(" ");
-        if (!emailMatch) emailMatch = historyText.match(/[\w.-]+@[\w.-]+\.\w+/);
-        if (!orderMatch) orderMatch = historyText.match(/#?(\d{4,})/);
+      const reversedHistory = [...history].reverse();
+      const historyText = reversedHistory.map(h => h.content).join(" ");
+      if (!emailMatch) emailMatch = historyText.match(/[\w.-]+@[\w.-]+\.\w+/);
+      if (!orderMatch) orderMatch = historyText.match(/#?(\d{4,})/);
     }
 
     let orderData = null;
     if (orderMatch && emailMatch) {
-        const orderId = orderMatch[1];
-        const email = emailMatch[0];
-        console.log(`🔎 Buscando pedido ${orderId} para ${email}...`);
-        
-        const result = await getOrderStatus(orderId, email);
-        if (result.found) {
-            orderData = `[DATOS_ENCONTRADOS]
+      const orderId = orderMatch[1];
+      const email = emailMatch[0];
+      console.log(`🔎 Buscando pedido ${orderId} para ${email}...`);
+
+      const result = await getOrderStatus(orderId, email);
+      if (result.found) {
+        orderData = `[DATOS_ENCONTRADOS]
             ID: ${result.data.id}
             ESTADO_RAW: ${result.data.status}
             TRACKING: ${result.data.trackingNumber}
@@ -446,11 +500,11 @@ app.post("/api/ai/search", async (req, res) => {
             CARRIER: ${result.data.carrier}
             ITEMS: ${result.data.items}
             PRECIO: ${result.data.price}`;
-        } else if (result.reason === "email_mismatch") {
-            orderData = "❌ ERROR SEGURIDAD: El email no coincide con el del pedido.";
-        } else {
-            orderData = "❌ ERROR: No existe ningún pedido con ese número.";
-        }
+      } else if (result.reason === "email_mismatch") {
+        orderData = "❌ ERROR SEGURIDAD: El email no coincide con el del pedido.";
+      } else {
+        orderData = "❌ ERROR: No existe ningún pedido con ese número.";
+      }
     }
 
     // ---------------------------------------------------------
@@ -479,25 +533,27 @@ app.post("/api/ai/search", async (req, res) => {
 
     const combinedCandidates = new Map();
     contextProducts.forEach(p => combinedCandidates.set(String(p.id), p));
-    searchResults.forEach(p => { 
-        if (combinedCandidates.size < 10) combinedCandidates.set(String(p.id), p); 
+    searchResults.forEach(p => {
+      if (combinedCandidates.size < 10) combinedCandidates.set(String(p.id), p);
     });
     const finalCandidatesList = Array.from(combinedCandidates.values());
 
     const productsContext = finalCandidatesList.map(p => {
-        const colorOption = p.options ? p.options.find(o => o.name.match(/color|cor/i)) : null;
-        const officialColors = colorOption ? colorOption.values.join(", ") : "Único";
-        const cleanDescription = cleanText(p.body_html || p.description);
-        
-        const isVisible = visible_ids && visible_ids.map(String).includes(String(p.id)) ? "(EN PANTALLA - USUARIO LO ESTÁ VIENDO)" : "";
+      const colorOption = p.options ? p.options.find(o => o.name.match(/color|cor/i)) : null;
+      const officialColors = colorOption ? colorOption.values.join(", ") : "Único";
+      const cleanDescription = cleanText(p.body_html || p.description);
+      const stockText = formatStockForAI(p.variants ? p.variants.edges : null);
 
-        return `PRODUCTO ${isVisible}:
+      const isVisible = visible_ids && visible_ids.map(String).includes(String(p.id)) ? "(EN PANTALLA - USUARIO LO ESTÁ VIENDO)" : "";
+
+      return `PRODUCTO ${isVisible}:
         - ID: ${p.id}
         - Título: ${p.title}
         - Precio: ${p.price} €
         - Colores: ${officialColors}
         - Descripción: ${cleanDescription}
-        - Specs: ${JSON.stringify(p.metafields)}`;
+        - Specs: ${JSON.stringify(p.metafields)}
+        - Stock: ${stockText}`;
     }).join("\n\n");
 
     // ---------------------------------------------------------
@@ -534,7 +590,7 @@ app.post("/api/ai/search", async (req, res) => {
               - Si ves "[DATOS_ENCONTRADOS]", USA ESTRICTAMENTE ESTA PLANTILLA VISUAL:
                 "📋 **Estado del pedido [ID]:**
                 
-                • **Estado:** [Traduce: FULFILLED->"✅ Enviado / Completado" | UNFULFILLED->"📦 En preparación"]
+                • **Estado:** [Traduce: FULFILLED->"✅ Enviado" | UNFULFILLED->"📦 En preparación"]
                 • **Transportista:** [CARRIER]
                 • **Tracking:** [TRACKING]
                 • **Enlace:** <a href='[LINK]' target='_blank'>Pincha aquí para ver dónde está</a>
@@ -578,12 +634,12 @@ app.post("/api/ai/search", async (req, res) => {
       const original = finalCandidatesList.find(p => String(p.id) === String(targetId));
       if (!original || seenIds.has(original.id)) return null;
       seenIds.add(original.id);
-      
+
       let displayImage = original.image;
       let displayUrlParams = "";
       if (typeof aiProd === 'object' && aiProd.variant_id && original.variants) {
-         const v = original.variants.find(v => String(v.id) === String(aiProd.variant_id));
-         if(v) { if(v.image) displayImage = v.image; displayUrlParams=`?variant=${v.id}`; }
+        const v = original.variants.find(v => String(v.id) === String(aiProd.variant_id));
+        if (v) { if (v.image) displayImage = v.image; displayUrlParams = `?variant=${v.id}`; }
       }
       return { ...original, displayImage, displayUrlParams };
     }).filter(Boolean);
@@ -593,20 +649,20 @@ app.post("/api/ai/search", async (req, res) => {
     // ---------------------------------------------------------
     const currentSessionId = session_id || "anonimo";
     const newInteraction = [
-        { role: "user", content: q, timestamp: new Date() },
-        { role: "assistant", content: aiContent.reply, timestamp: new Date() }
+      { role: "user", content: q, timestamp: new Date() },
+      { role: "assistant", content: aiContent.reply, timestamp: new Date() }
     ];
     const fullHistoryToSave = [...(history || []), ...newInteraction];
 
     supabase.from('chat_sessions').upsert({
-        session_id: currentSessionId,
-        conversation: fullHistoryToSave,
-        category: aiContent.category || "GENERAL",
-        updated_at: new Date()
+      session_id: currentSessionId,
+      conversation: fullHistoryToSave,
+      category: aiContent.category || "GENERAL",
+      updated_at: new Date()
     }, { onConflict: 'session_id' })
-    .then(({ error }) => {
+      .then(({ error }) => {
         if (error) console.error("❌ Error Supabase:", error);
-    });
+      });
 
     res.json({ products: finalProducts, text: aiContent.reply });
 
