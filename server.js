@@ -430,44 +430,44 @@ function cleanText(text) {
     .trim()
     .substring(0, 600);         // Limita longitud
 }
-// Función para convertir las variantes de Shopify a texto para la IA
+// Función para convertir las variantes de Shopify a texto para la IA (SIN CANTIDADES)
 function formatStockForAI(variants) {
-  if (!variants || variants.length === 0) return "Sin información de stock.";
+    if (!variants || variants.length === 0) return "Sin información de stock.";
 
-  let stockInfo = "STOCK Y PRECIOS ACTUALES:\n";
+    let stockInfo = "ESTADO DEL STOCK Y PRECIOS:\n";
 
-  variants.forEach(variant => {
-    const price = variant.price;
-    const qty = variant.inventoryQuantity;
-    const isAvailable = variant.availableForSale;
+    variants.forEach(variant => {
+        const price = variant.price;
+        const qty = variant.inventoryQuantity;
+        const isAvailable = variant.availableForSale;
 
-    // Extraemos Color y Talla limpiamente
-    let color = "";
-    let size = "";
+        // Extraemos Color y Talla limpiamente
+        let color = "";
+        let size = "";
+        
+        if (variant.selectedOptions) {
+            variant.selectedOptions.forEach(opt => {
+                if (opt.name.toLowerCase() === "color") color = opt.value;
+                if (opt.name.toLowerCase().includes("talla") || opt.name.toLowerCase() === "size") size = opt.value;
+            });
+        }
 
-    if (variant.selectedOptions) {
-      variant.selectedOptions.forEach(opt => {
-        if (opt.name.toLowerCase() === "color") color = opt.value;
-        if (opt.name.toLowerCase().includes("talla") || opt.name.toLowerCase() === "size") size = opt.value;
-      });
-    }
+        const variantName = (color && size) ? `${color} - Talla ${size}` : variant.title;
 
-    // Si no detecta opciones separadas, usa el título por defecto (ej: "Rojo / M")
-    const variantName = (color && size) ? `${color} - Talla ${size}` : variant.title;
+        // --- NUEVA LÓGICA DE STOCK OCULTO ---
+        let status = "";
+        if (isAvailable && qty > 0) {
+            // Si quedan 2 o menos, decimos "Últimas unidades", si no, "En stock"
+            status = qty <= 2 ? `🟠 ¡Últimas unidades!` : `🟢 En stock`;
+        } else {
+            status = "🔴 AGOTADO";
+        }
 
-    // Determinamos el estado del stock
-    let status = "";
-    if (isAvailable && qty > 0) {
-      status = qty <= 2 ? `🟢 ¡SOLO QUEDAN ${qty} UNIDADES!` : `🟢 ${qty} en stock`;
-    } else {
-      status = "🔴 AGOTADO";
-    }
+        // Añadimos la línea al resumen (ya no sale el número, solo el texto y el precio)
+        stockInfo += `- ${variantName}: ${status} (${price}€)\n`;
+    });
 
-    // Añadimos la línea al resumen
-    stockInfo += `- ${variantName}: ${status} (${price}€)\n`;
-  });
-
-  return stockInfo;
+    return stockInfo;
 }
 
 /* --- ENDPOINT PRINCIPAL (CEREBRO TOTAL + LOGS AGRUPADOS) --- */
