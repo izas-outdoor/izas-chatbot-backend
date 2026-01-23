@@ -171,6 +171,7 @@ async function getAllProducts() {
           variants(first: 50) {
             edges {
               node {
+                id
                 title
                 price # <-- NUEVO: Precio de esta talla/color
                 availableForSale
