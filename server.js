@@ -210,6 +210,9 @@ async function getAllProducts() {
         title: v.node.title,
         price: v.node.price,
         image: v.node.image?.url || "",
+        availableForSale: v.node.availableForSale,
+        inventoryQuantity: v.node.inventoryQuantity,
+        selectedOptions: v.node.selectedOptions
       }));
 
       products.push({
@@ -428,42 +431,43 @@ function cleanText(text) {
     .substring(0, 600);         // Limita longitud
 }
 // Función para convertir las variantes de Shopify a texto para la IA
-function formatStockForAI(variantsEdges) {
-    if (!variantsEdges || variantsEdges.length === 0) return "Sin información de stock.";
+function formatStockForAI(variants) {
+  if (!variants || variants.length === 0) return "Sin información de stock.";
 
-    let stockInfo = "STOCK Y PRECIOS ACTUALES:\n";
+  let stockInfo = "STOCK Y PRECIOS ACTUALES:\n";
 
-    variantsEdges.forEach(edge => {
-        const variant = edge.node;
-        const price = variant.price;
-        const qty = variant.inventoryQuantity;
-        const isAvailable = variant.availableForSale;
+  variants.forEach(variant => {
+    const price = variant.price;
+    const qty = variant.inventoryQuantity;
+    const isAvailable = variant.availableForSale;
 
-        // Extraemos Color y Talla limpiamente
-        let color = "";
-        let size = "";
-        
-        variant.selectedOptions.forEach(opt => {
-            if (opt.name.toLowerCase() === "color") color = opt.value;
-            if (opt.name.toLowerCase().includes("talla") || opt.name.toLowerCase() === "size") size = opt.value;
-        });
+    // Extraemos Color y Talla limpiamente
+    let color = "";
+    let size = "";
 
-        // Si no detecta opciones separadas, usa el título por defecto (ej: "Rojo / M")
-        const variantName = (color && size) ? `${color} - Talla ${size}` : variant.title;
+    if (variant.selectedOptions) {
+      variant.selectedOptions.forEach(opt => {
+        if (opt.name.toLowerCase() === "color") color = opt.value;
+        if (opt.name.toLowerCase().includes("talla") || opt.name.toLowerCase() === "size") size = opt.value;
+      });
+    }
 
-        // Determinamos el estado del stock
-        let status = "";
-        if (isAvailable && qty > 0) {
-            status = qty <= 2 ? `🟢 ¡SOLO QUEDAN ${qty} UNIDADES!` : `🟢 ${qty} en stock`;
-        } else {
-            status = "🔴 AGOTADO";
-        }
+    // Si no detecta opciones separadas, usa el título por defecto (ej: "Rojo / M")
+    const variantName = (color && size) ? `${color} - Talla ${size}` : variant.title;
 
-        // Añadimos la línea al resumen
-        stockInfo += `- ${variantName}: ${status} (${price}€)\n`;
-    });
+    // Determinamos el estado del stock
+    let status = "";
+    if (isAvailable && qty > 0) {
+      status = qty <= 2 ? `🟢 ¡SOLO QUEDAN ${qty} UNIDADES!` : `🟢 ${qty} en stock`;
+    } else {
+      status = "🔴 AGOTADO";
+    }
 
-    return stockInfo;
+    // Añadimos la línea al resumen
+    stockInfo += `- ${variantName}: ${status} (${price}€)\n`;
+  });
+
+  return stockInfo;
 }
 
 /* --- ENDPOINT PRINCIPAL (CEREBRO TOTAL + LOGS AGRUPADOS) --- */
@@ -543,7 +547,7 @@ app.post("/api/ai/search", async (req, res) => {
       const colorOption = p.options ? p.options.find(o => o.name.match(/color|cor/i)) : null;
       const officialColors = colorOption ? colorOption.values.join(", ") : "Único";
       const cleanDescription = cleanText(p.body_html || p.description);
-      const stockText = formatStockForAI(p.variants ? p.variants.edges : null);
+      const stockText = formatStockForAI(p.variants);
 
       const isVisible = visible_ids && visible_ids.map(String).includes(String(p.id)) ? "(EN PANTALLA - USUARIO LO ESTÁ VIENDO)" : "";
 
