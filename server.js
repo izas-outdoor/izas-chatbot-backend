@@ -430,20 +430,19 @@ function cleanText(text) {
     .trim()
     .substring(0, 600);         // Limita longitud
 }
-// Función para convertir las variantes de Shopify a texto para la IA (SIN CANTIDADES)
+// Función para agrupar el stock por colores y hacerlo más legible y corto
 function formatStockForAI(variants) {
     if (!variants || variants.length === 0) return "Sin información de stock.";
 
-    let stockInfo = "ESTADO DEL STOCK Y PRECIOS:\n";
+    // Diccionario para agrupar tallas por color
+    const stockByColor = {};
 
     variants.forEach(variant => {
-        const price = variant.price;
         const qty = variant.inventoryQuantity;
         const isAvailable = variant.availableForSale;
 
-        // Extraemos Color y Talla limpiamente
-        let color = "";
-        let size = "";
+        let color = "Color Único";
+        let size = "Talla Única";
         
         if (variant.selectedOptions) {
             variant.selectedOptions.forEach(opt => {
@@ -452,20 +451,27 @@ function formatStockForAI(variants) {
             });
         }
 
-        const variantName = (color && size) ? `${color} - Talla ${size}` : variant.title;
+        if (!stockByColor[color]) stockByColor[color] = { sizes: [], available: false };
 
-        // --- NUEVA LÓGICA DE STOCK OCULTO ---
-        let status = "";
+        // Solo guardamos las tallas que tienen stock
         if (isAvailable && qty > 0) {
-            // Si quedan 2 o menos, decimos "Últimas unidades", si no, "En stock"
-            status = qty <= 2 ? `🟠 ¡Últimas unidades!` : `🟢 En stock`;
-        } else {
-            status = "🔴 AGOTADO";
+            stockByColor[color].available = true;
+            // Si quedan 2 o menos, añadimos la etiqueta de urgencia junto a la talla
+            const sizeLabel = qty <= 2 ? `${size} (¡últimas!)` : size;
+            stockByColor[color].sizes.push(sizeLabel);
         }
-
-        // Añadimos la línea al resumen (ya no sale el número, solo el texto y el precio)
-        stockInfo += `- ${variantName}: ${status} (${price}€)\n`;
     });
+
+    let stockInfo = "RESUMEN DE STOCK ACTUAL:\n";
+
+    // Convertimos el diccionario en texto legible
+    for (const [color, data] of Object.entries(stockByColor)) {
+        if (data.available && data.sizes.length > 0) {
+            stockInfo += `- ${color}: Tallas disponibles (${data.sizes.join(", ")})\n`;
+        } else {
+            stockInfo += `- ${color}: 🔴 AGOTADO\n`;
+        }
+    }
 
     return stockInfo;
 }
@@ -574,13 +580,18 @@ app.post("/api/ai/search", async (req, res) => {
 
               ⛔ REGLAS DE SEGURIDAD (IMPORTANTE):
               1. COMPETENCIA Y CANALES DE VENTA:
-                 - COMPARACIONES: No compares productos con otras marcas (Trango, North Face, etc.).Decathlon, Sprinter, Amazon y El Corte Inglés no es competencia directa, son distribuidores.
-                 - CANALES DE VENTA (Decathlon, Amazon...): SI PREGUNTAN SI VENDEMOS ALLÍ: No mientas. Di: "Sí, colaboramos con partners como Decathlon o Amazon, pero te recomiendo comprar aquí en nuestra web oficial para acceder a todo el catálogo, ofertas exclusivas y garantía directa."
+                 - COMPARACIONES: No compares productos con otras marcas (Trango, North Face, etc.). Decathlon, Sprinter, Amazon y El Corte Inglés no son competencia directa, son distribuidores.
+                 - CANALES DE VENTA: SI PREGUNTAN SI VENDEMOS ALLÍ: No mientas. Di: "Sí, colaboramos con partners como Decathlon o Amazon, pero te recomiendo comprar aquí en nuestra web oficial para acceder a todo el catálogo y garantía directa."
 
               2. CONOCIMIENTO:
                  - Usa "PRODUCTOS DISPONIBLES" para respuestas concretas.
-                 - Usa "DATOS DE MARCA" (abajo) para hablar de calidad general o tecnologías.
                  - Si no sabes algo, di: "No tengo ese dato ahora mismo".
+
+              3. GESTIÓN DE STOCK Y CONTEXTO VISUAL (¡MUY IMPORTANTE!):
+                 -Cuando informes del stock, sé muy breve y agrupa la información. Ejemplo: "En color Rojo lo tenemos disponible en las tallas S, M y L (¡de la L quedan las últimas!). En Azul está agotado." No hagas listas largas.
+                 - Si el usuario pregunta "¿qué stock hay?", "¿qué colores tienes?", "¿y en talla L?" sin decir el nombre del producto, ASUME SIEMPRE que se refiere a los productos con la etiqueta "(EN PANTALLA - USUARIO LO ESTÁ VIENDO)".
+                 - LEE EL STOCK de esos productos y respóndele directamente. 
+                 - Si el stock dice "🟠 ¡Últimas unidades!", genera sensación de urgencia ("¡Solo nos quedan las últimas unidades, date prisa!").
 
               --- MODOS DE RESPUESTA ---
 
@@ -588,8 +599,8 @@ app.post("/api/ai/search", async (req, res) => {
               - JSON "reply": Vende el producto. "Esta es nuestra mejor opción...".
               - JSON "products": [IDs encontrados].
 
-              MODO B: COMPARACIÓN / DETALLES
-              - Explica usando los datos técnicos.
+              MODO B: COMPARACIÓN / DETALLES / STOCK
+              - Explica usando los datos técnicos y el STOCK disponible.
 
               MODO C: RASTREO DE PEDIDOS
               - Si ves "[DATOS_ENCONTRADOS]", USA ESTRICTAMENTE ESTA PLANTILLA VISUAL:
@@ -603,14 +614,12 @@ app.post("/api/ai/search", async (req, res) => {
 
                 (Nota: Si [LINK] es "No disponible", NO pongas la línea del enlace).
 
-              - Si faltan datos: "Por motivos de seguridad, para consultar el estado necesito que me indiques tu número de pedido y el email de compra."
-
               --- DATOS ---
 
               DATOS PEDIDO LIVE:
               ${orderData || "N/A"}
 
-              DATOS DE MARCA (Calidad/Tecnología/Distribución):
+              DATOS DE MARCA:
               ${BRAND_INFO}
 
               FAQs:
