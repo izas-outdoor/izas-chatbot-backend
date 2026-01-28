@@ -57,7 +57,7 @@
   {
     "id": "contacto_agente",
     "question": "¿Puedo hablar con un agente humano?",
-    "answer": "¡Claro! Si están disponibles, te contestarán por aquí. Si no, escríbenos a info@izas-outdoor.com y te responderemos lo antes posible."
+    "answer": "¡Claro! Escríbenos a info@izas-outdoor.com y te responderemos lo antes posible."
   },
   {
     "id": "financiacion",
@@ -86,3 +86,4 @@
   }
 
 ]
+
