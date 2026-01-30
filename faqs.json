@@ -2,7 +2,7 @@
   {
     "id": "plazo_devolucion",
     "question": "¿Cuál es el plazo para hacer cambios o devoluciones?",
-    "answer": "El plazo es de 30 días desde la recepción del pedido. En campañas especiales como Black Friday o Rebajas, el plazo puede ser ampliado a 60 días."
+    "answer": "El plazo es de 30 días desde la recepción del pedido. En campañas especiales como Black Friday o Rebajas, las políticas de devoluciones podrían cambiar (a 60 días por ejemplo)."
   },
   {
     "id": "como_devolver",
@@ -86,4 +86,5 @@
   }
 
 ]
+
 
