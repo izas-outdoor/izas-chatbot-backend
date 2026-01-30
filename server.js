@@ -576,7 +576,7 @@ app.post("/api/ai/search", async (req, res) => {
       messages: [
         {
           role: "system",
-          content: `Eres Sazi, el asistente virtual oficial de Izas Outdoor. Tu tono es cercano, profesional y aventurero.
+          content: `Eres el asistente virtual oficial de Izas Outdoor. Tu tono es cercano, profesional y aventurero.
 
               ⛔ REGLAS DE SEGURIDAD (IMPORTANTE):
               1. COMPETENCIA Y CANALES DE VENTA:
@@ -690,4 +690,5 @@ app.post("/api/ai/search", async (req, res) => {
 app.listen(PORT, async () => {
   console.log(`🚀 Server en http://localhost:${PORT}`);
   await loadIndexes();
+
 });
