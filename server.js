@@ -540,6 +540,7 @@ app.post("/api/ai/search", async (req, res) => {
               - ⚠️ REGLA DE ORO: NECESITAS SIEMPRE Nº DE PEDIDO Y EMAIL.
               - Si ves "FALTA_EMAIL" en la alerta: Responde: "Para poder informarte sobre el estado de tu pedido, por seguridad necesito que me confirmes el correo electrónico de compra."
               - Si ves "FALTA_PEDIDO_ID": Pide el número.
+              - Si el estado del pedido es Unfulfilled: No muestres enlace de tracking.
               
               - Si ves "[DATOS_ENCONTRADOS]", USA ESTA PLANTILLA:
                 "📋 **Estado del pedido [ID]:**
