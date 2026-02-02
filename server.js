@@ -8,7 +8,6 @@ import { COLOR_CONCEPTS, CONCEPTS } from "./concepts.js";
 import { createClient } from "@supabase/supabase-js";
 
 /* --- INFORMACIÓN DE MARCA (CEREBRO FIJO) --- */
-/* --- INFORMACIÓN DE MARCA (CEREBRO FIJO) --- */
 const BRAND_INFO = `
 SOBRE IZAS OUTDOOR:
 Somos una marca especializada en ropa de montaña, trekking y outdoor.
@@ -28,6 +27,7 @@ DISTRIBUCIÓN Y VENTA:
 CALIDAD:
 Usamos costuras termoselladas en prendas impermeables y patrones ergonómicos para la libertad de movimiento.
 `;
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
@@ -51,24 +51,20 @@ function includesWord(q, word) {
   return q.includes(w);
 }
 
-
 function colorVariants(base) {
   const variants = [base];
-
-  // Plural
   if (base.endsWith("o")) {
-    variants.push(base.replace(/o$/, "a"));    // femenino singular
-    variants.push(base + "s");                 // masculino plural
-    variants.push(base.replace(/o$/, "os"));   // masculino plural (igual que anterior)
-    variants.push(base.replace(/o$/, "as"));   // femenino plural
+    variants.push(base.replace(/o$/, "a"));
+    variants.push(base + "s");
+    variants.push(base.replace(/o$/, "os"));
+    variants.push(base.replace(/o$/, "as"));
   } else if (base.endsWith("z")) {
-    variants.push(base.replace(/z$/, "ces"));  // plural especial
+    variants.push(base.replace(/z$/, "ces"));
   } else if (/[aeiouáéíóú]$/i.test(base)) {
-    variants.push(base + "s");                 // plural regular con vocal final
+    variants.push(base + "s");
   } else {
-    variants.push(base + "es");                // plural consonante irregular
+    variants.push(base + "es");
   }
-
   return variants.filter(Boolean);
 }
 
@@ -77,28 +73,20 @@ function colorVariants(base) {
 function normalizeQuery(query) {
   let q = ` ${query.toLowerCase()} `;
 
-  /* --------- CONCEPTOS DE PRODUCTO --------- */
-
   Object.values(CONCEPTS).forEach(concept => {
-    // 1. Si el usuario escribe un sinónimo → añadir canonical
     for (const match of concept.matches) {
       if (includesWord(q, match)) {
         q += ` ${concept.canonical}`;
         break;
       }
     }
-
-    // 2. Si el canonical está presente → añadir variantes
     if (includesWord(q, concept.canonical)) {
       q += " " + concept.matches.join(" ");
     }
   });
 
-  /* --------- COLORES --------- */
-
   Object.values(COLOR_CONCEPTS).forEach(color => {
     const variants = colorVariants(color.canonical);
-
     if (variants.some(v => includesWord(q, v))) {
       q += " " + color.matches.join(" ") + " ";
     }
@@ -129,15 +117,6 @@ function safeParse(value) {
   try { return JSON.parse(value); } catch { return value; }
 }
 
-function metafieldToText(key, value) {
-  const label = key.replace("custom.", "").replaceAll("_", " ");
-
-  if (Array.isArray(value)) return `${label}: ${value.join(", ")}`;
-  if (typeof value === "object") return `${label}: ${JSON.stringify(value)}`;
-
-  return `${label}: ${value}`;
-}
-
 /* ---------------- Products fetch ---------------- */
 
 async function getAllProducts() {
@@ -160,30 +139,19 @@ async function getAllProducts() {
           handle
           images(first: 1) { edges { node { url } } }
           descriptionHtml 
-          
-          # Opciones generales del producto (ej: ["Color", "Talla"])
-          options {
-            name
-            values
-          }
-          
-          # --- DATOS EN TIEMPO REAL: Tallas, Colores, Stock y Precio ---
+          options { name values }
           variants(first: 50) {
             edges {
               node {
                 id
                 title
-                price # <-- NUEVO: Precio de esta talla/color
+                price 
                 availableForSale
                 inventoryQuantity
-                selectedOptions { # <-- NUEVO: Separa limpiamente el color y la talla
-                  name
-                  value
-                }
+                selectedOptions { name value }
               }
             }
           }
-          
           metafields(first: 20) { edges { node { namespace key value } } }
         }
       }
@@ -194,7 +162,6 @@ async function getAllProducts() {
   while (hasNextPage) {
     const data = await fetchGraphQL(query, { cursor });
 
-    // Si hay error en la query, data será null y romperá aquí.
     if (!data || !data.products) {
       console.error("❌ Error grave recuperando productos. Revisa los permisos de Shopify.");
       break;
@@ -206,7 +173,7 @@ async function getAllProducts() {
       const cleanId = node.id.split("/").pop();
 
       const variantsClean = node.variants.edges.map(v => ({
-        id: v.node.id.split("/").pop(),
+        id: (v.node.id || "").split("/").pop(),
         title: v.node.title,
         price: v.node.price,
         image: v.node.image?.url || "",
@@ -220,18 +187,12 @@ async function getAllProducts() {
         title: node.title,
         handle: node.handle,
         description: node.description,
-
-        // Mapeamos descriptionHtml a body_html para mantener compatibilidad con tu código de limpieza
         body_html: node.descriptionHtml,
-
         productType: node.productType,
         price: node.variants.edges[0]?.node.price || "Consultar",
         tags: node.tags,
         image: node.images.edges[0]?.node.url || "",
-
-        // --- GUARDAMOS LAS OPCIONES ---
         options: node.options.map(o => ({ name: o.name, values: o.values })),
-
         variants: variantsClean,
         metafields: Object.fromEntries(
           node.metafields.edges.map(m => [`${m.node.namespace}.${m.node.key}`, safeParse(m.node.value)])
@@ -245,9 +206,10 @@ async function getAllProducts() {
   return products;
 }
 
-/* ---------------- ORDER HELPER CON CORRECCIÓN DE LINKS ---------------- */
+/* ---------------- ORDER HELPER CORREGIDO ---------------- */
 async function getOrderStatus(orderId, userEmail) {
   const cleanId = orderId.replace("#", "").trim();
+  console.log(`🔍 Consultando Shopify para ID: ${cleanId}, Email user: ${userEmail}`);
 
   const query = `
     query getOrder($query: String!) {
@@ -256,30 +218,9 @@ async function getOrderStatus(orderId, userEmail) {
           name
           email
           displayFulfillmentStatus
-          
-          totalPriceSet {
-            shopMoney {
-              amount
-              currencyCode
-            }
-          }
-          
-          fulfillments(first: 3) {
-            trackingInfo(first: 1) {
-              number
-              url
-              company
-            }
-          }
-          
-          lineItems(first: 5) {
-            edges {
-              node {
-                title
-                quantity
-              }
-            }
-          }
+          totalPriceSet { shopMoney { amount currencyCode } }
+          fulfillments { trackingInfo { number url company } }
+          lineItems(first: 10) { edges { node { title quantity } } }
         }
       }
     }
@@ -294,30 +235,36 @@ async function getOrderStatus(orderId, userEmail) {
 
     const order = data.orders.nodes[0];
 
+    // Verificación de seguridad (Email)
     if (order.email.toLowerCase().trim() !== userEmail.toLowerCase().trim()) {
       return { found: false, reason: "email_mismatch" };
     }
 
-    const tracking = order.fulfillments[0]?.trackingInfo[0];
-    const items = order.lineItems.edges.map(e => `${e.node.quantity}x ${e.node.title}`).join(", ");
-    const price = order.totalPriceSet?.shopMoney?.amount || "";
-
-    // --- LOGICA DE TRANSPORTISTAS Y LINKS ---
-    let carrierName = tracking?.company || "Empresa de transporte";
-    let finalTrackingUrl = tracking?.url || null; // Por defecto, usamos el de Shopify
-
-    // 1. Correos Express
-    if (carrierName === "0002") {
-      carrierName = "Correos Express";
+    // Datos del pedido
+    let itemsText = "Varios artículos";
+    if (order.lineItems && order.lineItems.edges) {
+        itemsText = order.lineItems.edges.map(e => `${e.node.quantity}x ${e.node.title}`).join(", ");
     }
 
-    // 2. DHL (Corrección de nombre y LINK)
-    if (carrierName === "0003") {
-      carrierName = "DHL";
-      // Si tenemos el número, forzamos el enlace oficial de DHL España
-      if (tracking?.number) {
-        finalTrackingUrl = `https://www.dhl.com/es-es/home/tracking.html?tracking-id=${tracking.number}&submit=1`;
-      }
+    const isUnfulfilled = order.displayFulfillmentStatus === "UNFULFILLED";
+    const tracking = (order.fulfillments && order.fulfillments[0]?.trackingInfo[0]) || null;
+    
+    let carrierName = "Pendiente de envío"; 
+    let trackingNumber = "En preparación";
+    let finalTrackingUrl = null;
+
+    if (!isUnfulfilled) {
+        carrierName = tracking?.company || "Agencia de transporte";
+        trackingNumber = tracking?.number || "No disponible";
+        finalTrackingUrl = tracking?.url || null;
+
+        if (carrierName === "0002") carrierName = "Correos Express";
+        if (carrierName === "0003") {
+            carrierName = "DHL";
+            if (tracking?.number) {
+                finalTrackingUrl = `https://www.dhl.com/es-es/home/tracking.html?tracking-id=${tracking.number}&submit=1`;
+            }
+        }
     }
 
     return {
@@ -325,11 +272,11 @@ async function getOrderStatus(orderId, userEmail) {
       data: {
         id: order.name,
         status: order.displayFulfillmentStatus,
-        trackingNumber: tracking?.number || "No disponible aún",
-        trackingUrl: finalTrackingUrl, // <--- Usamos nuestra URL corregida
+        trackingNumber: trackingNumber,
+        trackingUrl: finalTrackingUrl,
         carrier: carrierName,
-        items: items,
-        price: price
+        items: itemsText,
+        price: order.totalPriceSet?.shopMoney?.amount || ""
       }
     };
 
@@ -350,16 +297,11 @@ function buildAIText(product) {
 }
 
 async function loadIndexes() {
-  // 1. Productos
-  // En producción (Render), el sistema de archivos es efímero. 
-  // Siempre intentamos cargar de disco primero por si reiniciamos rápido, 
-  // pero si falla, descargamos de nuevo.
   if (fs.existsSync(INDEX_FILE)) {
     console.log("📦 Cargando productos desde caché...");
     try {
       aiIndex = JSON.parse(fs.readFileSync(INDEX_FILE, "utf8"));
     } catch (e) {
-      console.log("⚠️ Error leyendo caché, reindexando...");
       aiIndex = [];
     }
   }
@@ -371,12 +313,10 @@ async function loadIndexes() {
       const emb = await openai.embeddings.create({ model: "text-embedding-3-large", input: buildAIText(p) });
       aiIndex.push({ ...p, embedding: emb.data[0].embedding });
     }
-    // Intentamos guardar en disco (aunque en Render se borrará al redesplegar)
     try { fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex)); } catch (e) { }
   }
   console.log(`✅ Productos listos: ${aiIndex.length}`);
 
-  // 2. FAQs
   if (fs.existsSync(FAQ_FILE)) {
     const rawFaqs = JSON.parse(fs.readFileSync(FAQ_FILE, "utf8"));
     faqIndex = [];
@@ -397,14 +337,10 @@ async function refineQuery(userQuery, history) {
       {
         role: "system",
         content: `Eres un experto en entender el contexto de una conversación de compras.
-        
-        TU OBJETIVO:
-        Traducir lo que dice el usuario a una búsqueda clara para una base de datos vectorial.
-
-        REGLAS DE CONTEXTO:
-        1. Mira el último mensaje del ASISTENTE en el historial. ¿Mencionó algún producto específico?
-        2. Si el usuario hace una pregunta de seguimiento (ej: "¿qué colores tiene?", "¿y en rosa?", "¿es impermeable?"), DEBES incluir el NOMBRE DEL PRODUCTO en tu traducción.
-        3. Si el usuario dice solo colores (ej: "están en negro y rosa"), asume que se refiere al producto anterior y genera: "chaqueta [Nombre] color negro y rosa".
+        TU OBJETIVO: Traducir lo que dice el usuario a una búsqueda clara.
+        REGLAS:
+        1. Mira el último mensaje del ASISTENTE. ¿Mencionó algún producto?
+        2. Si el usuario pregunta "¿qué colores tiene?", INCLUYE el NOMBRE DEL PRODUCTO en tu traducción.
         `
       },
       ...history.slice(-4),
@@ -416,25 +352,24 @@ async function refineQuery(userQuery, history) {
 }
 
 /* ---------------- Similarity ---------------- */
-
 function cosineSimilarity(a, b) {
   return a.reduce((acc, val, i) => acc + val * b[i], 0);
 }
 
-// --- LIMPIEZA DE TEXTO (NUEVO) ---
+// --- LIMPIEZA DE TEXTO ---
 function cleanText(text) {
   if (!text) return "Sin información";
   return text
-    .replace(/<[^>]*>?/gm, " ") // Elimina HTML
-    .replace(/\s+/g, " ")       // Elimina espacios extra
+    .replace(/<[^>]*>?/gm, " ")
+    .replace(/\s+/g, " ")
     .trim()
-    .substring(0, 600);         // Limita longitud
+    .substring(0, 600);
 }
-// Función para agrupar el stock por colores y hacerlo más legible y corto
+
+// --- FORMATO DE STOCK AGRUPADO (SIN NÚMEROS) ---
 function formatStockForAI(variants) {
     if (!variants || variants.length === 0) return "Sin información de stock.";
 
-    // Diccionario para agrupar tallas por color
     const stockByColor = {};
 
     variants.forEach(variant => {
@@ -453,18 +388,14 @@ function formatStockForAI(variants) {
 
         if (!stockByColor[color]) stockByColor[color] = { sizes: [], available: false };
 
-        // Solo guardamos las tallas que tienen stock
         if (isAvailable && qty > 0) {
             stockByColor[color].available = true;
-            // Si quedan 2 o menos, añadimos la etiqueta de urgencia junto a la talla
             const sizeLabel = qty <= 2 ? `${size} (¡últimas!)` : size;
             stockByColor[color].sizes.push(sizeLabel);
         }
     });
 
     let stockInfo = "RESUMEN DE STOCK ACTUAL:\n";
-
-    // Convertimos el diccionario en texto legible
     for (const [color, data] of Object.entries(stockByColor)) {
         if (data.available && data.sizes.length > 0) {
             stockInfo += `- ${color}: Tallas disponibles (${data.sizes.join(", ")})\n`;
@@ -472,18 +403,17 @@ function formatStockForAI(variants) {
             stockInfo += `- ${color}: 🔴 AGOTADO\n`;
         }
     }
-
     return stockInfo;
 }
 
-/* --- ENDPOINT PRINCIPAL (CEREBRO TOTAL + LOGS AGRUPADOS) --- */
+/* --- ENDPOINT PRINCIPAL --- */
 app.post("/api/ai/search", async (req, res) => {
   const { q, history, visible_ids, session_id } = req.body;
   if (!q) return res.status(400).json({ error: "Falta query" });
 
   try {
     // ---------------------------------------------------------
-    // 1. DETECCIÓN INTELIGENTE DE PEDIDOS
+    // 1. DETECCIÓN INTELIGENTE DE PEDIDOS (BLINDADO 🛡️)
     // ---------------------------------------------------------
     let emailMatch = q.match(/[\w.-]+@[\w.-]+\.\w+/);
     let orderMatch = q.match(/#?(\d{4,})/);
@@ -496,7 +426,10 @@ app.post("/api/ai/search", async (req, res) => {
     }
 
     let orderData = null;
+    let securityWarning = null; // 🔥 VARIABLE CRUCIAL
+
     if (orderMatch && emailMatch) {
+      // CASO A: TENEMOS TODO -> CONSULTAMOS
       const orderId = orderMatch[1];
       const email = emailMatch[0];
       console.log(`🔎 Buscando pedido ${orderId} para ${email}...`);
@@ -512,10 +445,17 @@ app.post("/api/ai/search", async (req, res) => {
             ITEMS: ${result.data.items}
             PRECIO: ${result.data.price}`;
       } else if (result.reason === "email_mismatch") {
-        orderData = "❌ ERROR SEGURIDAD: El email no coincide con el del pedido.";
+        orderData = "❌ ERROR SEGURIDAD: El email proporcionado no coincide con el del pedido.";
       } else {
         orderData = "❌ ERROR: No existe ningún pedido con ese número.";
       }
+
+    } else if (orderMatch && !emailMatch) {
+      // CASO B: FALTA EMAIL -> ALERTA
+      securityWarning = "FALTA_EMAIL";
+    } else if (!orderMatch && emailMatch) {
+      // CASO C: FALTA PEDIDO -> ALERTA
+      securityWarning = "FALTA_PEDIDO_ID";
     }
 
     // ---------------------------------------------------------
@@ -568,7 +508,7 @@ app.post("/api/ai/search", async (req, res) => {
     }).join("\n\n");
 
     // ---------------------------------------------------------
-    // 3. CEREBRO IA (PROMPT CORREGIDO)
+    // 3. CEREBRO IA (PROMPT ACTUALIZADO CON SEGURIDAD)
     // ---------------------------------------------------------
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -576,60 +516,48 @@ app.post("/api/ai/search", async (req, res) => {
       messages: [
         {
           role: "system",
-          content: `Eres el asistente virtual oficial de Izas Outdoor. Tu tono es cercano, profesional y aventurero.
+          content: `Eres Sazi, el asistente virtual oficial de Izas Outdoor. Tu tono es cercano, profesional y aventurero.
 
               ⛔ REGLAS DE SEGURIDAD (IMPORTANTE):
-              1. COMPETENCIA Y CANALES DE VENTA:
-                 - COMPARACIONES: No compares productos con otras marcas (Trango, North Face, etc.). Decathlon, Sprinter, Amazon y El Corte Inglés no son competencia directa, son distribuidores.
-                 - CANALES DE VENTA: SI PREGUNTAN SI VENDEMOS ALLÍ: No mientas. Di: "Sí, colaboramos con partners como Decathlon o Amazon, pero te recomiendo comprar aquí en nuestra web oficial para acceder a todo el catálogo y garantía directa."
-
-              2. CONOCIMIENTO:
-                 - Usa "PRODUCTOS DISPONIBLES" para respuestas concretas.
-                 - Si no sabes algo, di: "No tengo ese dato ahora mismo".
+              1. COMPETENCIA Y CANALES: Decathlon, Amazon... son partners. No mientas. Recomienda comprar en web oficial.
+              2. CONOCIMIENTO: Usa "PRODUCTOS DISPONIBLES". Si no sabes, dilo.
 
               3. GESTIÓN DE STOCK Y CONTEXTO VISUAL (¡MUY IMPORTANTE!):
-                 -Cuando informes del stock, sé muy breve y agrupa la información. Ejemplo: "En color Rojo lo tenemos disponible en las tallas S, M y L (¡de la L quedan las últimas!). En Azul está agotado." No hagas listas largas.
-                 - Si el usuario pregunta "¿qué stock hay?", "¿qué colores tienes?", "¿y en talla L?" sin decir el nombre del producto, ASUME SIEMPRE que se refiere a los productos con la etiqueta "(EN PANTALLA - USUARIO LO ESTÁ VIENDO)".
-                 - LEE EL STOCK de esos productos y respóndele directamente. 
-                 - Si el stock dice "🟠 ¡Últimas unidades!", genera sensación de urgencia ("¡Solo nos quedan las últimas unidades, date prisa!").
+                 - Cuando informes del stock, sé muy breve y agrupa la información. Ejemplo: "En color Rojo lo tenemos disponible en las tallas S, M y L (¡de la L quedan las últimas!)."
+                 - Si el usuario pregunta "¿qué stock hay?", "¿y en talla L?" sin decir nombre, ASUME que es el producto "(EN PANTALLA)".
+                 - Si ves "🟠 ¡Últimas unidades!", genera sensación de urgencia.
 
               --- MODOS DE RESPUESTA ---
 
-              MODO A: ESCAPARATE / BUSCADOR
-              - JSON "reply": Vende el producto. "Esta es nuestra mejor opción...".
-              - JSON "products": [IDs encontrados].
+              MODO A: ESCAPARATE
+              - JSON "reply": Vende el producto.
+              - JSON "products": [IDs].
 
-              MODO B: COMPARACIÓN / DETALLES / STOCK
-              - Explica usando los datos técnicos y el STOCK disponible.
+              MODO B: COMPARACIÓN / DETALLES
+              - Explica usando datos técnicos y stock.
 
-              MODO C: RASTREO DE PEDIDOS
-              - Si ves "[DATOS_ENCONTRADOS]", USA ESTRICTAMENTE ESTA PLANTILLA VISUAL:
+              MODO C: RASTREO DE PEDIDOS (SEGURIDAD MÁXIMA)
+              - ⚠️ REGLA DE ORO: NECESITAS SIEMPRE Nº DE PEDIDO Y EMAIL.
+              - Si ves "FALTA_EMAIL" en la alerta: Responde: "Para poder informarte sobre el estado de tu pedido, por seguridad necesito que me confirmes el correo electrónico de compra."
+              - Si ves "FALTA_PEDIDO_ID": Pide el número.
+              
+              - Si ves "[DATOS_ENCONTRADOS]", USA ESTA PLANTILLA:
                 "📋 **Estado del pedido [ID]:**
-                
-                • **Estado:** [Traduce: FULFILLED->"✅ Enviado" | UNFULFILLED->"📦 En preparación"]
+                • **Estado:** [Traduce FULFILLED/UNFULFILLED]
                 • **Transportista:** [CARRIER]
                 • **Tracking:** [TRACKING]
-                • **Enlace:** <a href='[LINK]' target='_blank'>Pincha aquí para ver dónde está</a>
+                • **Enlace:** <a href='[LINK]' target='_blank'>Ver envío</a>
                 • **Artículos:** [ITEMS]"
-
-                (Nota: Si [LINK] es "No disponible", NO pongas la línea del enlace).
 
               --- DATOS ---
 
-              DATOS PEDIDO LIVE:
-              ${orderData || "N/A"}
-
-              DATOS DE MARCA:
-              ${BRAND_INFO}
-
-              FAQs:
-              ${faqResults.map(f => `P:${f.question} R:${f.answer}`).join("\n")}
-              
-              PRODUCTOS DISPONIBLES:
-              ${productsContext}
+              ALERTA SEGURIDAD: ${securityWarning || "Ninguna"}
+              DATOS PEDIDO LIVE: ${orderData || "N/A"}
+              DATOS DE MARCA: ${BRAND_INFO}
+              FAQs: ${faqResults.map(f => `P:${f.question} R:${f.answer}`).join("\n")}
+              PRODUCTOS DISPONIBLES: ${productsContext}
 
               Responde JSON: { "reply": "...", "products": [...], "category": "ETIQUETA" }
-              Etiquetas: LOGISTICA, PRODUCTO, COMPARATIVA, ATENCION_CLIENTE, OTRO.
               `
         },
         ...history.slice(-2).map(m => ({ role: m.role, content: m.content })),
@@ -673,10 +601,7 @@ app.post("/api/ai/search", async (req, res) => {
       conversation: fullHistoryToSave,
       category: aiContent.category || "GENERAL",
       updated_at: new Date()
-    }, { onConflict: 'session_id' })
-      .then(({ error }) => {
-        if (error) console.error("❌ Error Supabase:", error);
-      });
+    }, { onConflict: 'session_id' }).then(({ error }) => { if (error) console.error("❌ Error Supabase:", error); });
 
     res.json({ products: finalProducts, text: aiContent.reply });
 
@@ -690,5 +615,4 @@ app.post("/api/ai/search", async (req, res) => {
 app.listen(PORT, async () => {
   console.log(`🚀 Server en http://localhost:${PORT}`);
   await loadIndexes();
-
 });
