@@ -1,13 +1,24 @@
+/* ==========================================================================
+   🚀 SERVIDOR SAZI (IZAS OUTDOOR CHATBOT)
+   ==========================================================================
+   Este servidor actúa como el "Cerebro Central".
+   - Conecta con Shopify (Catálogo y Pedidos).
+   - Conecta con OpenAI (Inteligencia).
+   - Conecta con Supabase (Memoria y Logs).
+   - Sirve a la Web, y está preparado para WhatsApp e Instagram.
+   ========================================================================== */
+
 import express from "express";
 import "dotenv/config";
 import fetch from "node-fetch";
 import OpenAI from "openai";
 import fs from "fs";
 import cors from "cors";
-import { COLOR_CONCEPTS, CONCEPTS } from "./concepts.js";
+import { COLOR_CONCEPTS, CONCEPTS } from "./concepts.js"; // Diccionarios de sinónimos
 import { createClient } from "@supabase/supabase-js";
 
-/* --- INFORMACIÓN DE MARCA (CEREBRO FIJO) --- */
+/* --- 🏢 INFORMACIÓN DE MARCA (CONTEXTO FIJO) --- */
+/* Estos datos se inyectan siempre en la mente de la IA para que no alucine sobre la empresa */
 const BRAND_INFO = `
 SOBRE IZAS OUTDOOR:
 Somos una marca especializada en ropa de montaña, trekking y outdoor.
@@ -28,29 +39,33 @@ CALIDAD:
 Usamos costuras termoselladas en prendas impermeables y patrones ergonómicos para la libertad de movimiento.
 `;
 
+/* --- ⚙️ CONFIGURACIÓN DEL SERVIDOR --- */
 const app = express();
 const PORT = process.env.PORT || 3000;
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-app.use(cors({
-  origin: "*", // en producción lo cerramos
-}));
-app.use(express.json());
+app.use(cors({ origin: "*" })); // Permite conexiones desde cualquier lugar (Web, Localhost)
+app.use(express.json()); // Permite recibir datos JSON
 
+// Credenciales Shopify
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE;
 const ADMIN_TOKEN = process.env.SHOPIFY_ADMIN_TOKEN;
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Credenciales OpenAI
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-/* ---------------- Query helpers ---------------- */
 
+/* ==========================================================================
+   🛠️ HELPERS (HERRAMIENTAS DE AYUDA)
+   ========================================================================== */
+
+// Busca si una palabra está dentro de una frase (match exacto)
 function includesWord(q, word) {
   const w = ` ${word.toLowerCase()} `;
   return q.includes(w);
 }
 
+// Genera variantes gramaticales de colores (Rojo -> Rojas, Rojos...)
 function colorVariants(base) {
   const variants = [base];
   if (base.endsWith("o")) {
@@ -68,11 +83,11 @@ function colorVariants(base) {
   return variants.filter(Boolean);
 }
 
-/* ---------------- Query normalizer ---------------- */
-
+// Normaliza la búsqueda del usuario (traduce "chupa" a "chaqueta", etc.)
 function normalizeQuery(query) {
   let q = ` ${query.toLowerCase()} `;
 
+  // 1. Expansión de Conceptos (Sinónimos)
   Object.values(CONCEPTS).forEach(concept => {
     for (const match of concept.matches) {
       if (includesWord(q, match)) {
@@ -85,6 +100,7 @@ function normalizeQuery(query) {
     }
   });
 
+  // 2. Expansión de Colores
   Object.values(COLOR_CONCEPTS).forEach(color => {
     const variants = colorVariants(color.canonical);
     if (variants.some(v => includesWord(q, v))) {
@@ -95,8 +111,27 @@ function normalizeQuery(query) {
   return q;
 }
 
-/* ---------------- GraphQL helper ---------------- */
+// Limpia texto HTML sucio que viene de Shopify
+function cleanText(text) {
+  if (!text) return "Sin información";
+  return text
+    .replace(/<[^>]*>?/gm, " ") // Quita etiquetas <div>, <p>...
+    .replace(/\s+/g, " ")       // Quita espacios dobles
+    .trim()
+    .substring(0, 600);         // Corta para no gastar muchos tokens
+}
 
+// Cálculo matemático para ver similitud entre vectores (Búsqueda Semántica)
+function cosineSimilarity(a, b) {
+  return a.reduce((acc, val, i) => acc + val * b[i], 0);
+}
+
+
+/* ==========================================================================
+   🛍️ CONEXIÓN CON SHOPIFY (GRAPHQL)
+   ========================================================================== */
+
+// Función genérica para hablar con la API de Shopify
 async function fetchGraphQL(query, variables = {}) {
   const res = await fetch(`https://${SHOPIFY_STORE}/admin/api/2024-01/graphql.json`, {
     method: "POST",
@@ -111,19 +146,13 @@ async function fetchGraphQL(query, variables = {}) {
   return json.data;
 }
 
-/* ---------------- Helpers ---------------- */
-
-function safeParse(value) {
-  try { return JSON.parse(value); } catch { return value; }
-}
-
-/* ---------------- Products fetch ---------------- */
-
+// 📦 RECUPERADOR DE PRODUCTOS: Descarga todo el catálogo para estudiarlo
 async function getAllProducts() {
   let hasNextPage = true;
   let cursor = null;
   const products = [];
 
+  // Consulta gigante para traer todo: Info, variantes, stock, precios, opciones...
   const query = `
   query getProducts($cursor: String) {
     products(first: 50, after: $cursor, query: "status:active") {
@@ -131,23 +160,15 @@ async function getAllProducts() {
       edges {
         cursor
         node {
-          id 
-          title 
-          description 
-          productType 
-          tags 
-          handle
+          id title description productType tags handle
           images(first: 1) { edges { node { url } } }
           descriptionHtml 
           options { name values }
+          # DATOS DE STOCK EN TIEMPO REAL
           variants(first: 50) {
             edges {
               node {
-                id
-                title
-                price 
-                availableForSale
-                inventoryQuantity
+                id title price availableForSale inventoryQuantity
                 selectedOptions { name value }
               }
             }
@@ -161,17 +182,17 @@ async function getAllProducts() {
 
   while (hasNextPage) {
     const data = await fetchGraphQL(query, { cursor });
-
     if (!data || !data.products) {
-      console.error("❌ Error grave recuperando productos. Revisa los permisos de Shopify.");
+      console.error("❌ Error grave recuperando productos.");
       break;
     }
 
     const edges = data.products.edges;
 
     edges.forEach(({ node }) => {
-      const cleanId = node.id.split("/").pop();
+      const cleanId = node.id.split("/").pop(); // Limpia el ID (gid://shopify/Product/123 -> 123)
 
+      // Procesamos las variantes para guardarlas limpias
       const variantsClean = node.variants.edges.map(v => ({
         id: (v.node.id || "").split("/").pop(),
         title: v.node.title,
@@ -206,7 +227,7 @@ async function getAllProducts() {
   return products;
 }
 
-/* ---------------- ORDER HELPER CORREGIDO ---------------- */
+// 🚚 RASTREADOR DE PEDIDOS: Busca estado, tracking y transportista
 async function getOrderStatus(orderId, userEmail) {
   const cleanId = orderId.replace("#", "").trim();
   console.log(`🔍 Consultando Shopify para ID: ${cleanId}, Email user: ${userEmail}`);
@@ -215,9 +236,7 @@ async function getOrderStatus(orderId, userEmail) {
     query getOrder($query: String!) {
       orders(first: 1, query: $query) {
         nodes {
-          name
-          email
-          displayFulfillmentStatus
+          name email displayFulfillmentStatus
           totalPriceSet { shopMoney { amount currencyCode } }
           fulfillments { trackingInfo { number url company } }
           lineItems(first: 10) { edges { node { title quantity } } }
@@ -235,17 +254,18 @@ async function getOrderStatus(orderId, userEmail) {
 
     const order = data.orders.nodes[0];
 
-    // Verificación de seguridad (Email)
+    // 🔒 VERIFICACIÓN DE SEGURIDAD (Si el email no coincide, bloqueamos)
     if (order.email.toLowerCase().trim() !== userEmail.toLowerCase().trim()) {
       return { found: false, reason: "email_mismatch" };
     }
 
-    // Datos del pedido
+    // Formatear lista de artículos
     let itemsText = "Varios artículos";
     if (order.lineItems && order.lineItems.edges) {
         itemsText = order.lineItems.edges.map(e => `${e.node.quantity}x ${e.node.title}`).join(", ");
     }
 
+    // Lógica para detectar si ha salido o no
     const isUnfulfilled = order.displayFulfillmentStatus === "UNFULFILLED";
     const tracking = (order.fulfillments && order.fulfillments[0]?.trackingInfo[0]) || null;
     
@@ -258,6 +278,7 @@ async function getOrderStatus(orderId, userEmail) {
         trackingNumber = tracking?.number || "No disponible";
         finalTrackingUrl = tracking?.url || null;
 
+        // Correcciones de nombres y links oficiales
         if (carrierName === "0002") carrierName = "Correos Express";
         if (carrierName === "0003") {
             carrierName = "DHL";
@@ -286,9 +307,13 @@ async function getOrderStatus(orderId, userEmail) {
   }
 }
 
-/* ---------------- AI INDEX ---------------- */
-let aiIndex = [];
-let faqIndex = [];
+
+/* ==========================================================================
+   🤖 CEREBRO IA (INDEXADO Y FORMATEO)
+   ========================================================================== */
+
+let aiIndex = []; // Aquí viven los productos en memoria RAM
+let faqIndex = []; // Aquí viven las FAQs en memoria RAM
 const INDEX_FILE = "./ai-index.json";
 const FAQ_FILE = "./faqs.json";
 
@@ -296,20 +321,20 @@ function buildAIText(product) {
   return `TIPO: ${product.productType}\nTITULO: ${product.title}\nDESC: ${product.description}\nTAGS: ${product.tags.join(", ")}`;
 }
 
+// Carga los productos al iniciar el servidor (Caché -> O descarga nueva)
 async function loadIndexes() {
   if (fs.existsSync(INDEX_FILE)) {
     console.log("📦 Cargando productos desde caché...");
     try {
       aiIndex = JSON.parse(fs.readFileSync(INDEX_FILE, "utf8"));
-    } catch (e) {
-      aiIndex = [];
-    }
+    } catch (e) { aiIndex = []; }
   }
 
   if (aiIndex.length === 0) {
     console.log("🤖 Indexando productos en Shopify (esto puede tardar)...");
     const products = await getAllProducts();
     for (const p of products) {
+      // Vectorizamos cada producto para que la IA lo entienda
       const emb = await openai.embeddings.create({ model: "text-embedding-3-large", input: buildAIText(p) });
       aiIndex.push({ ...p, embedding: emb.data[0].embedding });
     }
@@ -317,6 +342,7 @@ async function loadIndexes() {
   }
   console.log(`✅ Productos listos: ${aiIndex.length}`);
 
+  // Carga de FAQs
   if (fs.existsSync(FAQ_FILE)) {
     const rawFaqs = JSON.parse(fs.readFileSync(FAQ_FILE, "utf8"));
     faqIndex = [];
@@ -329,7 +355,7 @@ async function loadIndexes() {
   }
 }
 
-/* --- Helper de refinamiento --- */
+// 🧹 REFINAMIENTO: Traduce "quiero unos pantalones" a una query técnica
 async function refineQuery(userQuery, history) {
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -351,22 +377,7 @@ async function refineQuery(userQuery, history) {
   return response.choices[0].message.content;
 }
 
-/* ---------------- Similarity ---------------- */
-function cosineSimilarity(a, b) {
-  return a.reduce((acc, val, i) => acc + val * b[i], 0);
-}
-
-// --- LIMPIEZA DE TEXTO ---
-function cleanText(text) {
-  if (!text) return "Sin información";
-  return text
-    .replace(/<[^>]*>?/gm, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .substring(0, 600);
-}
-
-// --- FORMATO DE STOCK AGRUPADO (SIN NÚMEROS) ---
+// 🛡️ FORMATO DE STOCK SEGURO: Agrupa por color y oculta cantidades exactas
 function formatStockForAI(variants) {
     if (!variants || variants.length === 0) return "Sin información de stock.";
 
@@ -379,6 +390,7 @@ function formatStockForAI(variants) {
         let color = "Color Único";
         let size = "Talla Única";
         
+        // Intentamos sacar Color y Talla limpios
         if (variant.selectedOptions) {
             variant.selectedOptions.forEach(opt => {
                 if (opt.name.toLowerCase() === "color") color = opt.value;
@@ -390,11 +402,13 @@ function formatStockForAI(variants) {
 
         if (isAvailable && qty > 0) {
             stockByColor[color].available = true;
+            // FOMO: Si hay 2 o menos, añadimos etiqueta de urgencia
             const sizeLabel = qty <= 2 ? `${size} (¡últimas!)` : size;
             stockByColor[color].sizes.push(sizeLabel);
         }
     });
 
+    // Construimos el texto resumen para la IA
     let stockInfo = "RESUMEN DE STOCK ACTUAL:\n";
     for (const [color, data] of Object.entries(stockByColor)) {
         if (data.available && data.sizes.length > 0) {
@@ -406,18 +420,22 @@ function formatStockForAI(variants) {
     return stockInfo;
 }
 
-/* --- ENDPOINT PRINCIPAL --- */
+
+/* ==========================================================================
+   🚪 ENDPOINT PRINCIPAL (/api/ai/search)
+   ========================================================================== */
 app.post("/api/ai/search", async (req, res) => {
   const { q, history, visible_ids, session_id } = req.body;
   if (!q) return res.status(400).json({ error: "Falta query" });
 
   try {
     // ---------------------------------------------------------
-    // 1. DETECCIÓN INTELIGENTE DE PEDIDOS (BLINDADO 🛡️)
+    // 1. 🔍 DETECCIÓN Y SEGURIDAD DE PEDIDOS
     // ---------------------------------------------------------
-    let emailMatch = q.match(/[\w.-]+@[\w.-]+\.\w+/);
-    let orderMatch = q.match(/#?(\d{4,})/);
+    let emailMatch = q.match(/[\w.-]+@[\w.-]+\.\w+/); // Detecta emails
+    let orderMatch = q.match(/#?(\d{4,})/);           // Detecta números largos
 
+    // Si falta algo, miramos en el historial del chat
     if ((!emailMatch || !orderMatch) && history) {
       const reversedHistory = [...history].reverse();
       const historyText = reversedHistory.map(h => h.content).join(" ");
@@ -426,10 +444,10 @@ app.post("/api/ai/search", async (req, res) => {
     }
 
     let orderData = null;
-    let securityWarning = null; // 🔥 VARIABLE CRUCIAL
+    let securityWarning = null; // 🚦 SEMÁFORO DE SEGURIDAD
 
     if (orderMatch && emailMatch) {
-      // CASO A: TENEMOS TODO -> CONSULTAMOS
+      // CASO A: TENEMOS LOS DOS DATOS ✅ -> CONSULTAMOS
       const orderId = orderMatch[1];
       const email = emailMatch[0];
       console.log(`🔎 Buscando pedido ${orderId} para ${email}...`);
@@ -451,37 +469,42 @@ app.post("/api/ai/search", async (req, res) => {
       }
 
     } else if (orderMatch && !emailMatch) {
-      // CASO B: FALTA EMAIL -> ALERTA
+      // CASO B: FALTA EMAIL ⚠️ -> ACTIVAMOS ALERTA
       securityWarning = "FALTA_EMAIL";
     } else if (!orderMatch && emailMatch) {
-      // CASO C: FALTA PEDIDO -> ALERTA
+      // CASO C: FALTA PEDIDO ⚠️ -> ACTIVAMOS ALERTA
       securityWarning = "FALTA_PEDIDO_ID";
     }
 
     // ---------------------------------------------------------
-    // 2. PREPARACIÓN DE BÚSQUEDA DE PRODUCTOS
+    // 2. 🧠 BÚSQUEDA SEMÁNTICA (PRODUCTOS)
     // ---------------------------------------------------------
     const optimizedQuery = await refineQuery(q, history || []);
     if (aiIndex.length === 0) await loadIndexes();
 
+    // Filtramos productos que el usuario ya tiene en pantalla (Contexto Visual)
     let contextProducts = [];
     if (visible_ids && visible_ids.length > 0) {
       contextProducts = aiIndex.filter(p => visible_ids.map(String).includes(String(p.id)));
     }
 
+    // Buscamos en el vector DB
     const embResponse = await openai.embeddings.create({ model: "text-embedding-3-large", input: optimizedQuery });
     const vector = embResponse.data[0].embedding;
 
+    // Buscamos productos similares
     const searchResults = aiIndex
       .map(p => ({ ...p, score: cosineSimilarity(vector, p.embedding) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 8);
 
+    // Buscamos FAQs similares
     const faqResults = faqIndex
       .map(f => ({ ...f, score: cosineSimilarity(vector, f.embedding) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 2);
 
+    // Unimos los resultados (Priorizando los que el usuario ya ve)
     const combinedCandidates = new Map();
     contextProducts.forEach(p => combinedCandidates.set(String(p.id), p));
     searchResults.forEach(p => {
@@ -489,11 +512,12 @@ app.post("/api/ai/search", async (req, res) => {
     });
     const finalCandidatesList = Array.from(combinedCandidates.values());
 
+    // Generamos el texto que leerá la IA
     const productsContext = finalCandidatesList.map(p => {
       const colorOption = p.options ? p.options.find(o => o.name.match(/color|cor/i)) : null;
       const officialColors = colorOption ? colorOption.values.join(", ") : "Único";
       const cleanDescription = cleanText(p.body_html || p.description);
-      const stockText = formatStockForAI(p.variants);
+      const stockText = formatStockForAI(p.variants); // Usamos el nuevo formateador agrupado
 
       const isVisible = visible_ids && visible_ids.map(String).includes(String(p.id)) ? "(EN PANTALLA - USUARIO LO ESTÁ VIENDO)" : "";
 
@@ -503,12 +527,11 @@ app.post("/api/ai/search", async (req, res) => {
         - Precio: ${p.price} €
         - Colores: ${officialColors}
         - Descripción: ${cleanDescription}
-        - Specs: ${JSON.stringify(p.metafields)}
         - Stock: ${stockText}`;
     }).join("\n\n");
 
     // ---------------------------------------------------------
-    // 3. CEREBRO IA (PROMPT ACTUALIZADO CON SEGURIDAD)
+    // 3. 🗣️ GENERACIÓN DE RESPUESTA (PROMPT DE SISTEMA)
     // ---------------------------------------------------------
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -540,7 +563,6 @@ app.post("/api/ai/search", async (req, res) => {
               - ⚠️ REGLA DE ORO: NECESITAS SIEMPRE Nº DE PEDIDO Y EMAIL.
               - Si ves "FALTA_EMAIL" en la alerta: Responde: "Para poder informarte sobre el estado de tu pedido, por seguridad necesito que me confirmes el correo electrónico de compra."
               - Si ves "FALTA_PEDIDO_ID": Pide el número.
-              - Si el estado del pedido es Unfulfilled: No muestres enlace de tracking.
               
               - Si ves "[DATOS_ENCONTRADOS]", USA ESTA PLANTILLA:
                 "📋 **Estado del pedido [ID]:**
@@ -569,7 +591,7 @@ app.post("/api/ai/search", async (req, res) => {
     const aiContent = JSON.parse(completion.choices[0].message.content);
 
     // ---------------------------------------------------------
-    // 4. PROCESADO DE RESPUESTA
+    // 4. 🖼️ PROCESADO FINAL (IMÁGENES Y VARIANTES)
     // ---------------------------------------------------------
     const seenIds = new Set();
     const finalProducts = (aiContent.products || []).map(aiProd => {
@@ -578,6 +600,7 @@ app.post("/api/ai/search", async (req, res) => {
       if (!original || seenIds.has(original.id)) return null;
       seenIds.add(original.id);
 
+      // Si la IA recomienda una variante específica (ej: color rojo), ponemos esa foto
       let displayImage = original.image;
       let displayUrlParams = "";
       if (typeof aiProd === 'object' && aiProd.variant_id && original.variants) {
@@ -588,7 +611,7 @@ app.post("/api/ai/search", async (req, res) => {
     }).filter(Boolean);
 
     // ---------------------------------------------------------
-    // 5. GUARDADO EN SUPABASE
+    // 5. 💾 GUARDADO EN SUPABASE (HISTORIAL)
     // ---------------------------------------------------------
     const currentSessionId = session_id || "anonimo";
     const newInteraction = [
@@ -612,8 +635,10 @@ app.post("/api/ai/search", async (req, res) => {
   }
 });
 
-/* ---------------- Start ---------------- */
+/* ==========================================================================
+   🚀 INICIO DEL SERVIDOR
+   ========================================================================== */
 app.listen(PORT, async () => {
   console.log(`🚀 Server en http://localhost:${PORT}`);
-  await loadIndexes();
+  await loadIndexes(); // Carga la memoria al arrancar
 });
