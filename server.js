@@ -559,7 +559,7 @@ app.post("/api/ai/search", async (req, res) => {
 
               MODO A: ESCAPARATE
               - JSON "reply": Vende el producto.
-              - JSON "products": [IDs].
+              - JSON "products": [IDs].ETIQUETA
 
               MODO B: COMPARACIÓN / DETALLES
               - Explica usando datos técnicos y stock.
@@ -586,6 +586,7 @@ app.post("/api/ai/search", async (req, res) => {
               PRODUCTOS DISPONIBLES: ${productsContext}
 
               Responde JSON: { "reply": "...", "products": [...], "category": "ETIQUETA" }
+              ETIQUETAS PERMITIDAS: LOGISTICA, PRODUCTO, COMPARATIVA, ATENCIOIN_CLIENTE, OTRO.
               `
         },
         ...history.slice(-2).map(m => ({ role: m.role, content: m.content })),
