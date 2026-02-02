@@ -126,6 +126,11 @@ function cosineSimilarity(a, b) {
   return a.reduce((acc, val, i) => acc + val * b[i], 0);
 }
 
+// 🔥 ESTA ERA LA FUNCIÓN QUE FALTABA: Parsea JSON de forma segura
+function safeParse(value) {
+  try { return JSON.parse(value); } catch { return value; }
+}
+
 
 /* ==========================================================================
    🛍️ CONEXIÓN CON SHOPIFY (GRAPHQL)
