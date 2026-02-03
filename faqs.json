@@ -12,7 +12,7 @@
   {
     "id": "coste_devolucion",
     "question": "¿Cuánto cuesta hacer un cambio o devolución?",
-    "answer": "Los cambios son gratuitos (si realizas todos los cambios de un pedido a la vez). Las devoluciones tienen un coste de 4,99€ si se hacen por transporte, o son gratuitas si las realizas en una tienda oficial Izas."
+    "answer": "Los cambios son gratuitos (si realizas todos los cambios de un pedido a la vez). Las devoluciones tienen un coste de 4,99€ si se hacen por transporte, o son gratuitas si las realizas en una tienda oficial Izas. Para optimizar el proceso de transporte y disminuir la huella medioambiental se premiará con cambio gratuito a todo aquel que realice todos los cambios dentro de un mismo pedido, en una única solicitud, es decir, si tú has comprado 5 prendas y decides cambiar hoy 4 de ellas, esos 4 cambios serán gratis, pero si pasado una semana decides cambiar esa otra prenda de ese mismo pedido, se aplicará un coste de transporte de 2,99€. Todos los cambios que provengan de un cambio anterior (cambio después de haber cambiado un producto anteriormente) también contarán con esa tarifa.   "
   },
   {
     "id": "producto_defectuoso",
@@ -84,8 +84,4 @@
     "question": "No estaba en casa y han dejado el paquete en un punto de recogida",
     "answer": "Si no estabas, el transportista puede dejarlo en un punto cercano para agilizar. Si necesitas entrega en domicilio obligatoria, escríbenos a info@izas-outdoor.com para intentar reprogramarlo."
   }
-
 ]
-
-
-
