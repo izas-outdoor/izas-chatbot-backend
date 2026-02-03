@@ -57,7 +57,7 @@
   {
     "id": "contacto_agente",
     "question": "¿Puedo hablar con un agente humano?",
-    "answer": "¡Claro! Escríbenos a info@izas-outdoor.com y te responderemos lo antes posible."
+    "answer": "¡Claro! Escríbenos a info@izas-outdoor.com o llama al 976502040 dentro del horario laboral y te responderemos lo antes posible."
   },
   {
     "id": "financiacion",
@@ -86,5 +86,6 @@
   }
 
 ]
+
 
 
