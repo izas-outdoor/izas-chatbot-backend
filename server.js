@@ -121,6 +121,13 @@ function cleanText(text) {
     .substring(0, 600);         // Corta para no gastar muchos tokens
 }
 
+// LIMPIADOR DE JSON: Quita las comillas markdown si la IA las pone
+function cleanAIJSON(text) {
+  if (!text) return "{}";
+  // Quita ```json al principio y ``` al final si existen
+  return text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "").trim();
+}
+
 // Cálculo matemático para ver similitud entre vectores (Búsqueda Semántica)
 function cosineSimilarity(a, b) {
   return a.reduce((acc, val, i) => acc + val * b[i], 0);
@@ -267,30 +274,30 @@ async function getOrderStatus(orderId, userEmail) {
     // Formatear lista de artículos
     let itemsText = "Varios artículos";
     if (order.lineItems && order.lineItems.edges) {
-        itemsText = order.lineItems.edges.map(e => `${e.node.quantity}x ${e.node.title}`).join(", ");
+      itemsText = order.lineItems.edges.map(e => `${e.node.quantity}x ${e.node.title}`).join(", ");
     }
 
     // Lógica para detectar si ha salido o no
     const isUnfulfilled = order.displayFulfillmentStatus === "UNFULFILLED";
     const tracking = (order.fulfillments && order.fulfillments[0]?.trackingInfo[0]) || null;
-    
-    let carrierName = "Pendiente de envío"; 
+
+    let carrierName = "Pendiente de envío";
     let trackingNumber = "En preparación";
     let finalTrackingUrl = null;
 
     if (!isUnfulfilled) {
-        carrierName = tracking?.company || "Agencia de transporte";
-        trackingNumber = tracking?.number || "No disponible";
-        finalTrackingUrl = tracking?.url || null;
+      carrierName = tracking?.company || "Agencia de transporte";
+      trackingNumber = tracking?.number || "No disponible";
+      finalTrackingUrl = tracking?.url || null;
 
-        // Correcciones de nombres y links oficiales
-        if (carrierName === "0002") carrierName = "Correos Express";
-        if (carrierName === "0003") {
-            carrierName = "DHL";
-            if (tracking?.number) {
-                finalTrackingUrl = `https://www.dhl.com/es-es/home/tracking.html?tracking-id=${tracking.number}&submit=1`;
-            }
+      // Correcciones de nombres y links oficiales
+      if (carrierName === "0002") carrierName = "Correos Express";
+      if (carrierName === "0003") {
+        carrierName = "DHL";
+        if (tracking?.number) {
+          finalTrackingUrl = `https://www.dhl.com/es-es/home/tracking.html?tracking-id=${tracking.number}&submit=1`;
         }
+      }
     }
 
     return {
@@ -384,45 +391,45 @@ async function refineQuery(userQuery, history) {
 
 // 🛡️ FORMATO DE STOCK SEGURO: Agrupa por color y oculta cantidades exactas
 function formatStockForAI(variants) {
-    if (!variants || variants.length === 0) return "Sin información de stock.";
+  if (!variants || variants.length === 0) return "Sin información de stock.";
 
-    const stockByColor = {};
+  const stockByColor = {};
 
-    variants.forEach(variant => {
-        const qty = variant.inventoryQuantity;
-        const isAvailable = variant.availableForSale;
+  variants.forEach(variant => {
+    const qty = variant.inventoryQuantity;
+    const isAvailable = variant.availableForSale;
 
-        let color = "Color Único";
-        let size = "Talla Única";
-        
-        // Intentamos sacar Color y Talla limpios
-        if (variant.selectedOptions) {
-            variant.selectedOptions.forEach(opt => {
-                if (opt.name.toLowerCase() === "color") color = opt.value;
-                if (opt.name.toLowerCase().includes("talla") || opt.name.toLowerCase() === "size") size = opt.value;
-            });
-        }
+    let color = "Color Único";
+    let size = "Talla Única";
 
-        if (!stockByColor[color]) stockByColor[color] = { sizes: [], available: false };
-
-        if (isAvailable && qty > 0) {
-            stockByColor[color].available = true;
-            // FOMO: Si hay 2 o menos, añadimos etiqueta de urgencia
-            const sizeLabel = qty <= 2 ? `${size} (¡últimas!)` : size;
-            stockByColor[color].sizes.push(sizeLabel);
-        }
-    });
-
-    // Construimos el texto resumen para la IA
-    let stockInfo = "RESUMEN DE STOCK ACTUAL:\n";
-    for (const [color, data] of Object.entries(stockByColor)) {
-        if (data.available && data.sizes.length > 0) {
-            stockInfo += `- ${color}: Tallas disponibles (${data.sizes.join(", ")})\n`;
-        } else {
-            stockInfo += `- ${color}: 🔴 AGOTADO\n`;
-        }
+    // Intentamos sacar Color y Talla limpios
+    if (variant.selectedOptions) {
+      variant.selectedOptions.forEach(opt => {
+        if (opt.name.toLowerCase() === "color") color = opt.value;
+        if (opt.name.toLowerCase().includes("talla") || opt.name.toLowerCase() === "size") size = opt.value;
+      });
     }
-    return stockInfo;
+
+    if (!stockByColor[color]) stockByColor[color] = { sizes: [], available: false };
+
+    if (isAvailable && qty > 0) {
+      stockByColor[color].available = true;
+      // FOMO: Si hay 2 o menos, añadimos etiqueta de urgencia
+      const sizeLabel = qty <= 2 ? `${size} (¡últimas!)` : size;
+      stockByColor[color].sizes.push(sizeLabel);
+    }
+  });
+
+  // Construimos el texto resumen para la IA
+  let stockInfo = "RESUMEN DE STOCK ACTUAL:\n";
+  for (const [color, data] of Object.entries(stockByColor)) {
+    if (data.available && data.sizes.length > 0) {
+      stockInfo += `- ${color}: Tallas disponibles (${data.sizes.join(", ")})\n`;
+    } else {
+      stockInfo += `- ${color}: 🔴 AGOTADO\n`;
+    }
+  }
+  return stockInfo;
 }
 
 
@@ -600,7 +607,25 @@ app.post("/api/ai/search", async (req, res) => {
       ]
     });
 
-    const aiContent = JSON.parse(completion.choices[0].message.content);
+    // 1. Obtenemos el texto crudo
+    const rawContent = completion.choices[0].message.content;
+
+    // 2. Lo limpiamos por si trae basura de Markdown
+    const cleanContent = cleanAIJSON(rawContent);
+
+    // 3. Ahora sí, lo leemos
+    let aiContent;
+    try {
+      aiContent = JSON.parse(cleanContent);
+    } catch (err) {
+      console.error("❌ Error parseando JSON de OpenAI:", rawContent);
+      // Fallback de emergencia para que no se quede colgado
+      aiContent = {
+        reply: "Lo siento, me he liado un poco procesando tu solicitud. ¿Me lo puedes repetir?",
+        products: [],
+        category: "ERROR"
+      };
+    }
 
     // ---------------------------------------------------------
     // 4. 🖼️ PROCESADO FINAL (IMÁGENES Y VARIANTES)
