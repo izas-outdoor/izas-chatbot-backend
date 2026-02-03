@@ -455,6 +455,10 @@ app.post("/api/ai/search", async (req, res) => {
       if (!orderMatch) orderMatch = historyText.match(/#?(\d{4,})/);
     }
 
+    if (emailMatch && emailMatch[0].includes("izas-outdoor.com")) {
+      emailMatch = null;
+    }
+
     let orderData = null;
     let securityWarning = null; // 🚦 SEMÁFORO DE SEGURIDAD
 
@@ -564,10 +568,11 @@ app.post("/api/ai/search", async (req, res) => {
                  - Si ves "🟠 ¡Últimas unidades!", genera sensación de urgencia.
               
               4. 🚨 DERIVACIÓN A HUMANO (PRIORIDAD MÁXIMA):
-                 - Si el usuario pide explícitamente "hablar con un agente", "humano" o "persona":
-                 - NO INTENTES CONVENCERLE DE QUE TE QUEDES.
-                 - TU RESPUESTA DEBE SER EXACTAMENTE: "¡Claro! Escríbenos a info@izas-outdoor.com o llama al 976502040 dentro del horario laboral y te responderemos lo antes posible."
-                 - ETIQUETA JSON: "DERIVACION_HUMANA"
+                 - Si piden "agente", "humano", "persona": NO INTENTES AYUDAR.
+                 - RESPUESTA OBLIGATORIA: "¡Sin problema! Para hablar con un compañero humano, por favor pulsa el botón de WhatsApp que verás en pantalla o escríbenos a nuestro contacto oficial. 👇"
+                 - ETIQUETA: "DERIVACION_HUMANA"
+                 - ⚠️ IMPORTANTE: Mantén la estructura JSON estándar.
+                   Ejemplo: { "reply": "¡Sin problema!...", "category": "DERIVACION_HUMANA", "products": [] }
 
               --- MODOS DE RESPUESTA ---
 
