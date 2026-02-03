@@ -548,6 +548,7 @@ app.post("/api/ai/search", async (req, res) => {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       response_format: { type: "json_object" },
+      temperature: 0.1,
       messages: [
         {
           role: "system",
@@ -563,7 +564,7 @@ app.post("/api/ai/search", async (req, res) => {
                  - Si ves "🟠 ¡Últimas unidades!", genera sensación de urgencia.
               
               4. 🚨 DERIVACIÓN A HUMANO (PRIORIDAD MÁXIMA):
-                 - Si el usuario pide explícitamente "hablar con un agente", "humano", "persona" o "teléfono":
+                 - Si el usuario pide explícitamente "hablar con un agente", "humano" o "persona":
                  - NO INTENTES CONVENCERLE DE QUE TE QUEDES.
                  - TU RESPUESTA DEBE SER EXACTAMENTE: "¡Claro! Escríbenos a info@izas-outdoor.com o llama al 976502040 dentro del horario laboral y te responderemos lo antes posible."
                  - ETIQUETA JSON: "DERIVACION_HUMANA"
@@ -609,21 +610,21 @@ app.post("/api/ai/search", async (req, res) => {
 
     // 1. Obtenemos el texto crudo
     const rawContent = completion.choices[0].message.content;
+    console.log("RAW OPENAI RESPONSE:", rawContent);
 
-    // 2. Lo limpiamos por si trae basura de Markdown
-    const cleanContent = cleanAIJSON(rawContent);
+    // 2. Limpieza de emergencia (por si mete comillas de markdown)
+    const cleanContent = rawContent.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "").trim();
 
-    // 3. Ahora sí, lo leemos
     let aiContent;
     try {
       aiContent = JSON.parse(cleanContent);
     } catch (err) {
-      console.error("❌ Error parseando JSON de OpenAI:", rawContent);
-      // Fallback de emergencia para que no se quede colgado
+      console.error("❌ ERROR PARSEANDO JSON:", err);
+      // Respuesta de emergencia para que el usuario no vea "Error de conexión"
       aiContent = {
-        reply: "Lo siento, me he liado un poco procesando tu solicitud. ¿Me lo puedes repetir?",
+        reply: "Lo siento, me he liado procesando tu solicitud. ¿Podrías repetirmela de otra forma?",
         products: [],
-        category: "ERROR"
+        category: "ERROR_JSON"
       };
     }
 
