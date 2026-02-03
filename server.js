@@ -1,5 +1,5 @@
 /* ==========================================================================
-   🚀 SERVIDOR IZAS OUTDOOR CHATBOT
+   🚀 SERVIDOR SAZI (IZAS OUTDOOR CHATBOT)
    ==========================================================================
    Este servidor actúa como el "Cerebro Central".
    - Conecta con Shopify (Catálogo y Pedidos).
@@ -554,6 +554,12 @@ app.post("/api/ai/search", async (req, res) => {
                  - Cuando informes del stock, sé muy breve y agrupa la información. Ejemplo: "En color Rojo lo tenemos disponible en las tallas S, M y L (¡de la L quedan las últimas!)."
                  - Si el usuario pregunta "¿qué stock hay?", "¿y en talla L?" sin decir nombre, ASUME que es el producto "(EN PANTALLA)".
                  - Si ves "🟠 ¡Últimas unidades!", genera sensación de urgencia.
+              
+              4. 🚨 DERIVACIÓN A HUMANO (PRIORIDAD MÁXIMA):
+                 - Si el usuario pide explícitamente "hablar con un agente", "humano", "persona" o "teléfono":
+                 - NO INTENTES CONVENCERLE DE QUE TE QUEDES.
+                 - TU RESPUESTA DEBE SER EXACTAMENTE: "¡Claro! Escríbenos a info@izas-outdoor.com o llama al 976502040 dentro del horario laboral y te responderemos lo antes posible."
+                 - ETIQUETA JSON: "DERIVACION_HUMANA"
 
               --- MODOS DE RESPUESTA ---
 
@@ -586,7 +592,7 @@ app.post("/api/ai/search", async (req, res) => {
               PRODUCTOS DISPONIBLES: ${productsContext}
 
               Responde JSON: { "reply": "...", "products": [...], "category": "ETIQUETA" }
-              ETIQUETAS PERMITIDAS: LOGISTICA, PRODUCTO, COMPARATIVA, ATENCION_CLIENTE, OTRO.
+              ETIQUETAS PERMITIDAS: LOGISTICA, PRODUCTO, COMPARATIVA, ATENCIOIN_CLIENTE, OTRO.
               `
         },
         ...history.slice(-2).map(m => ({ role: m.role, content: m.content })),
@@ -647,6 +653,4 @@ app.post("/api/ai/search", async (req, res) => {
 app.listen(PORT, async () => {
   console.log(`🚀 Server en http://localhost:${PORT}`);
   await loadIndexes(); // Carga la memoria al arrancar
-
 });
-
