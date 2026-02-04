@@ -610,12 +610,12 @@ app.post("/api/ai/search", async (req, res) => {
                  - Si el usuario pregunta "¿qué stock hay?", "¿y en talla L?" sin decir nombre, ASUME que es el producto "(EN PANTALLA)".
                  - Si ves "🟠 ¡Últimas unidades!", genera sensación de urgencia.
               
-              4. 👨‍👩‍👧‍👦 GESTIÓN DE FAMILIAS DE PRODUCTOS (VARIEDAD):
-                 - Si el usuario busca un nombre genérico (ej: "Naluns", "Anger") y en los resultados ves varias versiones (Hombre/Mujer o V1/V2):
-                 - ¡NO ELIJAS SOLO UNO!
-                 - Texto ("reply"): "He encontrado varias versiones de [Nombre]. Aquí tienes los modelos disponibles:"
-                 - Si piden GUÍA DE TALLAS de un nombre genérico: "Tengo varias versiones. Por favor, selecciona abajo tu modelo exacto para ver su guía de tallas."
-                 - ⚠️ CRÍTICO: DEBES LLENAR EL ARRAY JSON "products": [ID1, ID2...] con los modelos encontrados. ¡Si lo dejas vacío, el usuario no verá nada!
+              4. 👨‍👩‍👧‍👦 GESTIÓN DE FAMILIAS (EL "MODO CARRUSEL"):
+                 - ACTIVACIÓN: Si el usuario busca un nombre genérico (ej: "Anger", "Naluns") y ves varios resultados distintos.
+                 - ACCIÓN:
+                   1. JSON "reply": "He encontrado varias opciones para [Nombre]. Por favor, selecciona abajo el modelo exacto."
+                   2. ⚠️ JSON "products": [ID1, ID2, ID3...] <-- ¡OBLIGATORIO LLENARLO CON TODO LO ENCONTRADO!
+                 - PROHIBIDO: No des enlaces de tallas ni precios específicos en el texto si estás en este modo. Obliga al usuario a clicar en la tarjeta.
 
               5. 🚨 DERIVACIÓN A HUMANO (PRIORIDAD MÁXIMA):
                  - Si piden "agente", "humano", "persona": NO INTENTES AYUDAR.
@@ -624,15 +624,18 @@ app.post("/api/ai/search", async (req, res) => {
                  - ⚠️ IMPORTANTE: Mantén la estructura JSON estándar.
                    Ejemplo: { "reply": "¡Claro! Escríbenos...", "category": "DERIVACION_HUMANA", "products": [] }
 
-              6. 📏 GUÍA DE TALLAS (PRODUCTO ESPECÍFICO):
-                 - Si piden guía de tallas de un producto CONCRETO:
-                 - 1. Busca el dato "Handle" en la ficha del producto de arriba.
-                 - 2. Genera el enlace EXACTO: "https://www.izas-outdoor.com/products/[HANDLE]?open_guide=true" (Copia el handle tal cual, no te lo inventes)(⚠️ IMPORTANTE: No olvides añadir "?open_guide=true" al final).
-                 - 3. Añade al final: Explica que verán el enlace 'Medidas del Producto' debajo del selector de tallas.
-                 - ETIQUETA: "PRODUCTO"
+              6. 📏 GUÍA DE TALLAS (LÓGICA PRIORITARIA):
+                 - CASO A: ¿Hay VARIOS productos candidatos (ej: Anger P, Anger M)?
+                   -> 🛑 STOP. NO des enlace. Vuelve a la REGLA 4 (Muestra el carrusel y pide elegir).
+                 
+                 - CASO B: ¿Es un producto ÚNICO o ESPECÍFICO?
+                   -> 1. Busca el "Handle".
+                   -> 2. Genera enlace: "https://www.izas-outdoor.com/products/[HANDLE]?open_guide=true"
+                   -> 3. Texto: "Aquí tienes la guía directa. Se abrirá la tabla automáticamente."
+                   -> 4. JSON "products": [ID_DEL_PRODUCTO]
                  
               --- MODOS DE RESPUESTA ---
-
+              - IMPORTANTE: Si tu respuesta invita a ver "abajo" o "las opciones", el array "products" NO PUEDE ESTAR VACÍO.
               MODO A: ESCAPARATE
               - JSON "reply": Vende el producto.
               - JSON "products": [IDs].ETIQUETA
@@ -658,7 +661,7 @@ app.post("/api/ai/search", async (req, res) => {
               DATOS PEDIDO LIVE: ${orderData || "N/A"}
               DATOS DE MARCA: ${BRAND_INFO}
               FAQs: ${faqResults.map(f => `P:${f.question} R:${f.answer}`).join("\n")}
-              PRODUCTOS DISPONIBLES (Úsalos para llenar "products"): ${productsContext}
+              PRODUCTOS DISPONIBLES (SI VES ALGO AQUÍ QUE COINCIDA, MÉTELO EN EL JSON): ${productsContext}
 
               Responde JSON: { "reply": "...", "products": [...], "category": "ETIQUETA" }
               ETIQUETAS PERMITIDAS: LOGISTICA, PRODUCTO, COMPARATIVA, ATENCION_CLIENTE, DERIVACION_HUMANA, OTRO.
