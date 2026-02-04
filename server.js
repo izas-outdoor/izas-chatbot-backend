@@ -574,6 +574,12 @@ app.post("/api/ai/search", async (req, res) => {
                  - ⚠️ IMPORTANTE: Mantén la estructura JSON estándar.
                    Ejemplo: { "reply": "¡Sin problema!...", "category": "DERIVACION_HUMANA", "products": [] }
 
+              5. 📏 GUÍA DE TALLAS (PRODUCTO ESPECÍFICO):
+                 - Si piden guía de tallas de un producto CONCRETO:
+                 - 1. Genera el enlace: "https://izas-outdoor.com/products/[HANDLE]" (El handle lo tienes en los datos del producto).
+                 - 2. Explica: "Te dejo el enlace directo. Verás el enlace 'Medidas del Producto' justo debajo de donde seleccionas la talla."
+                 - NO muestres la tabla de tallas genérica en el chat si preguntan por un producto específico, mejor mándalos a la ficha técnica para evitar errores.
+                 
               --- MODOS DE RESPUESTA ---
 
               MODO A: ESCAPARATE
@@ -605,7 +611,7 @@ app.post("/api/ai/search", async (req, res) => {
               PRODUCTOS DISPONIBLES: ${productsContext}
 
               Responde JSON: { "reply": "...", "products": [...], "category": "ETIQUETA" }
-              ETIQUETAS PERMITIDAS: LOGISTICA, PRODUCTO, COMPARATIVA, ATENCION_CLIENTE, OTRO.
+              ETIQUETAS PERMITIDAS: LOGISTICA, PRODUCTO, COMPARATIVA, ATENCIOIN_CLIENTE, OTRO.
               `
         },
         ...history.slice(-2).map(m => ({ role: m.role, content: m.content })),
@@ -684,5 +690,4 @@ app.post("/api/ai/search", async (req, res) => {
 app.listen(PORT, async () => {
   console.log(`🚀 Server en http://localhost:${PORT}`);
   await loadIndexes(); // Carga la memoria al arrancar
-
 });
