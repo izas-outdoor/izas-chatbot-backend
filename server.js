@@ -518,11 +518,47 @@ app.post("/api/ai/search", async (req, res) => {
     const embResponse = await openai.embeddings.create({ model: "text-embedding-3-large", input: optimizedQuery });
     const vector = embResponse.data[0].embedding;
 
-    // Buscamos productos similares
+    // ---------------------------------------------------------
+    // EN SERVER.JS - MODIFICACIÓN DE PUNTUACIÓN (SCORING)
+    // ---------------------------------------------------------
+
+    // 1. Detectamos si el usuario busca algo ESPECÍFICO (v2, v3...)
+    const versionMatch = optimizedQuery.match(/\b(v\d+|ii|iii)\b/i);
+    const targetVersion = versionMatch ? versionMatch[0].toLowerCase() : null;
+
     const searchResults = aiIndex
-      .map(p => ({ ...p, score: cosineSimilarity(vector, p.embedding) }))
+      .map(p => {
+        let score = cosineSimilarity(vector, p.embedding);
+        const titleLower = p.title.toLowerCase();
+        const queryLower = optimizedQuery.toLowerCase().trim();
+
+        // A. BOOST POR NOMBRE EXACTO (La regla de oro)
+        // Si el usuario busca "Naluns", todo lo que tenga "Naluns" recibe un empujón fuerte.
+        // Esto agrupa Naluns M, Naluns W, Naluns V2, etc. en el top.
+        const coreKeywords = queryLower.split(" ").filter(w => w.length > 3); // Palabras clave > 3 letras
+        const matchesCore = coreKeywords.some(kw => titleLower.includes(kw));
+
+        if (matchesCore) {
+          score += 0.3; // Gran empujón a la familia del producto
+        }
+
+        // B. LÓGICA DE VERSIONES (Solo filtramos si el usuario es ESPECÍFICO)
+        if (targetVersion) {
+          // Usuario: "Quiero la V2" -> Penalizamos lo que NO sea V2
+          if (titleLower.includes(targetVersion)) {
+            score += 0.4;
+          } else {
+            score -= 0.3; // Ocultamos las otras versiones
+          }
+        }
+        // C. SI LA BÚSQUEDA ES GENÉRICA (Usuario: "Naluns")
+        // -> ¡NO HACEMOS NADA! Dejamos que salgan todas (V1, V2, Hombre, Mujer)
+        // para que el usuario tenga variedad.
+
+        return { ...p, score };
+      })
       .sort((a, b) => b.score - a.score)
-      .slice(0, 8);
+      .slice(0, 8); // Devolvemos hasta 8 para que quepan todas las variantes
 
     // Buscamos FAQs similares
     const faqResults = faqIndex
@@ -578,14 +614,21 @@ app.post("/api/ai/search", async (req, res) => {
                  - Si el usuario pregunta "¿qué stock hay?", "¿y en talla L?" sin decir nombre, ASUME que es el producto "(EN PANTALLA)".
                  - Si ves "🟠 ¡Últimas unidades!", genera sensación de urgencia.
               
-              4. 🚨 DERIVACIÓN A HUMANO (PRIORIDAD MÁXIMA):
+              4. 👨‍👩‍👧‍👦 GESTIÓN DE FAMILIAS DE PRODUCTOS (VARIEDAD):
+                 - Si el usuario busca un nombre genérico (ej: "Naluns", "Pantalones") y en los resultados ("PRODUCTOS DISPONIBLES") ves varias versiones (Hombre/Mujer o V1/V2):
+                 - ¡NO ELIJAS SOLO UNO!
+                 - Muestra TODOS los relevantes en el carrusel (JSON "products").
+                 - En el texto ("reply"), di: "He encontrado varias versiones de [Nombre] (Hombre, Mujer, V2...). Aquí tienes los modelos disponibles:"
+                 - Si piden GUÍA DE TALLAS de un nombre genérico, NO des un enlace específico. Di: "Tengo varias versiones. Por favor, selecciona abajo tu modelo exacto para ver su guía de tallas."
+
+              5. 🚨 DERIVACIÓN A HUMANO (PRIORIDAD MÁXIMA):
                  - Si piden "agente", "humano", "persona": NO INTENTES AYUDAR.
                  - RESPUESTA OBLIGATORIA: "¡Claro! Escríbenos a info@izas-outdoor.com o llama al 976502040 dentro del horario laboral y te responderemos lo antes posible."
                  - ETIQUETA: "DERIVACION_HUMANA"
                  - ⚠️ IMPORTANTE: Mantén la estructura JSON estándar.
-                   Ejemplo: { "reply": "¡Sin problema!...", "category": "DERIVACION_HUMANA", "products": [] }
+                   Ejemplo: { "reply": "¡Claro! Escríbenos...", "category": "DERIVACION_HUMANA", "products": [] }
 
-              5. 📏 GUÍA DE TALLAS (PRODUCTO ESPECÍFICO):
+              6. 📏 GUÍA DE TALLAS (PRODUCTO ESPECÍFICO):
                  - Si piden guía de tallas de un producto CONCRETO:
                  - 1. Busca el dato "Handle" en la ficha del producto de arriba.
                  - 2. Genera el enlace EXACTO: "https://www.izas-outdoor.com/products/[HANDLE]" (Copia el handle tal cual, no te lo inventes).
@@ -623,7 +666,7 @@ app.post("/api/ai/search", async (req, res) => {
               PRODUCTOS DISPONIBLES: ${productsContext}
 
               Responde JSON: { "reply": "...", "products": [...], "category": "ETIQUETA" }
-              ETIQUETAS PERMITIDAS: LOGISTICA, PRODUCTO, COMPARATIVA, ATENCIOIN_CLIENTE, OTRO.
+              ETIQUETAS PERMITIDAS: LOGISTICA, PRODUCTO, COMPARATIVA, ATENCION_CLIENTE, DERIVACION_HUMANA, OTRO.
               `
         },
         ...history.slice(-2).map(m => ({ role: m.role, content: m.content })),
