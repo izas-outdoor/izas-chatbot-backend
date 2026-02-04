@@ -22,7 +22,7 @@
   {
     "id": "reembolso_dinero",
     "question": "¿Cómo y cuándo recibiré mi reembolso?",
-    "answer": "El reembolso es instantáneo. Puedes elegir recibirlo por transferencia bancaria (en segundos) o en el método de pago original (puede tardar 1-3 días). Recuerda que no se reembolsan los gastos de envío originales."
+    "answer": "El reembolso es instantáneo. Puedes elegir recibirlo por transferencia bancaria (en segundos) o en el método de pago original (puede tardar 1-3 días). Dependiendo de la entidad bancaria podría variar o tardar más días en verse reflejado en cuenta el reembolso desde el momento que se ha procesado. Recuerda que no se reembolsan los gastos de envío originales."
   },
   {
     "id": "devolucion_tienda",
@@ -79,12 +79,18 @@
     "question": "¿Por qué mi número de seguimiento no funciona en Correos?",
     "answer": "Si la web de Correos sale en blanco, contáctanos en info@izas-outdoor.com con el asunto 'Incidencia Seguimiento - [Tu Pedido]'. Podría ser una incidencia logística que debemos reclamar."
   },
+   {
+    "id": "guia_tallas",
+    "question": "¿Dónde puedo ver la guía de tallas?",
+    "answer": "Podrás encontrar la guía de tallas en la propia ficha de producto, clicando en Medidas del Producto. Ahí podrás encontrar las medidas de la prenda para poder comparar con otras prendas que tengas en casa."
+  },
   {
     "id": "ausente_casa",
     "question": "No estaba en casa y han dejado el paquete en un punto de recogida",
     "answer": "Si no estabas, el transportista puede dejarlo en un punto cercano para agilizar. Si necesitas entrega en domicilio obligatoria, escríbenos a info@izas-outdoor.com para intentar reprogramarlo."
   }
 ]
+
 
 
 
