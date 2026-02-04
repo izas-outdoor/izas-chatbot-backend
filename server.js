@@ -611,11 +611,11 @@ app.post("/api/ai/search", async (req, res) => {
                  - Si ves "🟠 ¡Últimas unidades!", genera sensación de urgencia.
               
               4. 👨‍👩‍👧‍👦 GESTIÓN DE FAMILIAS DE PRODUCTOS (VARIEDAD):
-                 - Si el usuario busca un nombre genérico (ej: "Naluns", "Pantalones") y en los resultados ("PRODUCTOS DISPONIBLES") ves varias versiones (Hombre/Mujer o V1/V2):
+                 - Si el usuario busca un nombre genérico (ej: "Naluns", "Anger") y en los resultados ves varias versiones (Hombre/Mujer o V1/V2):
                  - ¡NO ELIJAS SOLO UNO!
-                 - Muestra TODOS los relevantes en el carrusel (JSON "products").
-                 - En el texto ("reply"), di: "He encontrado varias versiones de [Nombre] (Hombre, Mujer, V2...). Aquí tienes los modelos disponibles:"
-                 - Si piden GUÍA DE TALLAS de un nombre genérico, NO des un enlace específico. Di: "Tengo varias versiones. Por favor, selecciona abajo tu modelo exacto para ver su guía de tallas."
+                 - Texto ("reply"): "He encontrado varias versiones de [Nombre]. Aquí tienes los modelos disponibles:"
+                 - Si piden GUÍA DE TALLAS de un nombre genérico: "Tengo varias versiones. Por favor, selecciona abajo tu modelo exacto para ver su guía de tallas."
+                 - ⚠️ CRÍTICO: DEBES LLENAR EL ARRAY JSON "products": [ID1, ID2...] con los modelos encontrados. ¡Si lo dejas vacío, el usuario no verá nada!
 
               5. 🚨 DERIVACIÓN A HUMANO (PRIORIDAD MÁXIMA):
                  - Si piden "agente", "humano", "persona": NO INTENTES AYUDAR.
@@ -654,12 +654,11 @@ app.post("/api/ai/search", async (req, res) => {
                 • **Artículos:** [ITEMS]"
 
               --- DATOS ---
-
               ALERTA SEGURIDAD: ${securityWarning || "Ninguna"}
               DATOS PEDIDO LIVE: ${orderData || "N/A"}
               DATOS DE MARCA: ${BRAND_INFO}
               FAQs: ${faqResults.map(f => `P:${f.question} R:${f.answer}`).join("\n")}
-              PRODUCTOS DISPONIBLES: ${productsContext}
+              PRODUCTOS DISPONIBLES (Úsalos para llenar "products"): ${productsContext}
 
               Responde JSON: { "reply": "...", "products": [...], "category": "ETIQUETA" }
               ETIQUETAS PERMITIDAS: LOGISTICA, PRODUCTO, COMPARATIVA, ATENCION_CLIENTE, DERIVACION_HUMANA, OTRO.
