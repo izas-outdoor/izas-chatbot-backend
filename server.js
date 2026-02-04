@@ -381,7 +381,7 @@ async function refineQuery(userQuery, history) {
         1. Contexto: Mira el historial. Si el usuario dice "quiero esa", busca el nombre del producto anterior.
         
         2. 🚨 GESTIÓN DE VERSIONES (CRÍTICO):
-           - Si el usuario dice "V2", "V3", "M V2": TU BÚSQUEDA DEBE INCLUIR "V2".
+           - Si el usuario dice "V2", "V3", "V4", "W V2", "M V2", "W V3", "M V3", "W V4", "M V4": TU BÚSQUEDA DEBE INCLUIRLO.
            - Si el usuario DICE EL NOMBRE A SECAS (ej: "Naluns M") y NO dice "V2":
              >>> TU BÚSQUEDA DEBE SER: "Naluns M original version 1"
              (Añade "original" o "version 1" para alejarla de la V2 en la búsqueda vectorial).
