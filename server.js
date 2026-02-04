@@ -379,6 +379,14 @@ async function refineQuery(userQuery, history) {
         REGLAS:
         1. Mira el último mensaje del ASISTENTE. ¿Mencionó algún producto?
         2. Si el usuario pregunta "¿qué colores tiene?", INCLUYE el NOMBRE DEL PRODUCTO en tu traducción.
+        3. 🔥 IMPORTANTE - VERSIONES EXACTAS:
+           - Si el usuario especifica "V2", "V3", "V4": ¡NO LO BORRES!
+           - "Naluns" y "Naluns V2" SON PRODUCTOS DIFERENTES.
+           - Tu traducción DEBE contener "V2" si el usuario lo dijo.
+
+        EJEMPLO:
+        User: "guia de tallas naluns m v2"
+        Tu respuesta: "chaqueta naluns m v2 guia tallas"
         `
       },
       ...history.slice(-4),
