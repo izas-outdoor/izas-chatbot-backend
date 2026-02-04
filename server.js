@@ -380,15 +380,11 @@ async function refineQuery(userQuery, history) {
         REGLAS DE ORO:
         1. Contexto: Mira el historial. Si el usuario dice "quiero esa", busca el nombre del producto anterior.
         
-        2. 🚨 GESTIÓN DE VERSIONES (CRÍTICO):
-           - Si el usuario dice "V2", "V3", "V4", "W V2", "M V2", "W V3", "M V3", "W V4", "M V4": TU BÚSQUEDA DEBE INCLUIRLO.
-           - Si el usuario DICE EL NOMBRE A SECAS (ej: "Naluns M") y NO dice "V2":
-             >>> TU BÚSQUEDA DEBE SER: "Naluns M original version 1"
-             (Añade "original" o "version 1" para alejarla de la V2 en la búsqueda vectorial).
-
-        EJEMPLOS:
-        - User: "guia tallas naluns m v2" -> Output: "chaqueta naluns m v2 guia tallas"
-        - User: "guia tallas naluns m"    -> Output: "chaqueta naluns m original version 1 guia tallas"
+        2. 🕵️‍♂️ PRECISIÓN vs VARIEDAD:
+           - Si el usuario especifica "V2", "V3", "V4": INCLÚYELO (ej: "Naluns M V2 guia tallas").
+           - Si el usuario busca un nombre GENÉRICO (ej: "Naluns"):
+             -> ¡NO inventes "original" ni "versión 1"! QUEREMOS QUE SALGAN TODAS.
+             -> Busca SOLO el nombre principal (ej: "Naluns") para que la base de datos devuelva Naluns M, W, V2, V3...
         `
       },
       ...history.slice(-4),
