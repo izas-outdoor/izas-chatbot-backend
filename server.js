@@ -676,7 +676,8 @@ app.post("/api/ai/search", async (req, res) => {
       updated_at: new Date()
     }, { onConflict: 'session_id' }).then(({ error }) => { if (error) console.error("❌ Error Supabase:", error); });
 
-    res.json({ products: finalProducts, text: aiContent.reply });
+    const isSizeContext = /talla|medida|guia|dimension|size/i.test(q);
+    res.json({ products: finalProducts, text: aiContent.reply, isSizeContext: isSizeContext });
 
   } catch (error) {
     console.error("❌ ERROR:", error);
