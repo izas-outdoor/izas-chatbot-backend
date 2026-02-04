@@ -1,5 +1,5 @@
 /* ==========================================================================
-   🚀 SERVIDOR SAZI (IZAS OUTDOOR CHATBOT)
+   🚀 SERVIDOR IZAS OUTDOOR CHATBOT
    ==========================================================================
    Este servidor actúa como el "Cerebro Central".
    - Conecta con Shopify (Catálogo y Pedidos).
@@ -744,4 +744,5 @@ app.post("/api/ai/search", async (req, res) => {
 app.listen(PORT, async () => {
   console.log(`🚀 Server en http://localhost:${PORT}`);
   await loadIndexes(); // Carga la memoria al arrancar
+
 });
