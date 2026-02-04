@@ -374,19 +374,21 @@ async function refineQuery(userQuery, history) {
     messages: [
       {
         role: "system",
-        content: `Eres un experto en entender el contexto de una conversación de compras.
-        TU OBJETIVO: Traducir lo que dice el usuario a una búsqueda clara.
-        REGLAS:
-        1. Mira el último mensaje del ASISTENTE. ¿Mencionó algún producto?
-        2. Si el usuario pregunta "¿qué colores tiene?", INCLUYE el NOMBRE DEL PRODUCTO en tu traducción.
-        3. 🔥 IMPORTANTE - VERSIONES EXACTAS:
-           - Si el usuario especifica "V2", "V3", "V4": ¡NO LO BORRES!
-           - "Naluns" y "Naluns V2" SON PRODUCTOS DIFERENTES.
-           - Tu traducción DEBE contener "V2" si el usuario lo dijo.
+        content: `Eres un experto en entender búsquedas de productos de eCommerce.
+        TU OBJETIVO: Generar la cadena de búsqueda perfecta para una base de datos vectorial.
 
-        EJEMPLO:
-        User: "guia de tallas naluns m v2"
-        Tu respuesta: "chaqueta naluns m v2 guia tallas"
+        REGLAS DE ORO:
+        1. Contexto: Mira el historial. Si el usuario dice "quiero esa", busca el nombre del producto anterior.
+        
+        2. 🚨 GESTIÓN DE VERSIONES (CRÍTICO):
+           - Si el usuario dice "V2", "V3", "M V2": TU BÚSQUEDA DEBE INCLUIR "V2".
+           - Si el usuario DICE EL NOMBRE A SECAS (ej: "Naluns M") y NO dice "V2":
+             >>> TU BÚSQUEDA DEBE SER: "Naluns M original version 1"
+             (Añade "original" o "version 1" para alejarla de la V2 en la búsqueda vectorial).
+
+        EJEMPLOS:
+        - User: "guia tallas naluns m v2" -> Output: "chaqueta naluns m v2 guia tallas"
+        - User: "guia tallas naluns m"    -> Output: "chaqueta naluns m original version 1 guia tallas"
         `
       },
       ...history.slice(-4),
