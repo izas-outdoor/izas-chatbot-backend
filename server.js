@@ -627,7 +627,7 @@ app.post("/api/ai/search", async (req, res) => {
               6. 📏 GUÍA DE TALLAS (PRODUCTO ESPECÍFICO):
                  - Si piden guía de tallas de un producto CONCRETO:
                  - 1. Busca el dato "Handle" en la ficha del producto de arriba.
-                 - 2. Genera el enlace EXACTO: "https://www.izas-outdoor.com/products/[HANDLE]" (Copia el handle tal cual, no te lo inventes).
+                 - 2. Genera el enlace EXACTO: "https://www.izas-outdoor.com/products/[HANDLE]?open_guide=true" (Copia el handle tal cual, no te lo inventes)(⚠️ IMPORTANTE: No olvides añadir "?open_guide=true" al final).
                  - 3. Añade al final: Explica que verán el enlace 'Medidas del Producto' debajo del selector de tallas.
                  - ETIQUETA: "PRODUCTO"
                  
