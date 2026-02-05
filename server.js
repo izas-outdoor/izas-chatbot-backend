@@ -739,10 +739,55 @@ app.post("/api/ai/search", async (req, res) => {
 });
 
 /* ==========================================================================
+   📝 ENDPOINT PARA GUARDAR LOGS MANUALES (Feedback, Botones, etc.)
+   ========================================================================== */
+app.post("/api/chat/log", async (req, res) => {
+  const { session_id, role, content } = req.body;
+
+  if (!session_id || !role || !content) return res.status(400).json({ error: "Faltan datos" });
+
+  try {
+    // 1. Recuperamos la conversación actual
+    const { data: session } = await supabase
+      .from('chat_sessions')
+      .select('conversation')
+      .eq('session_id', session_id)
+      .single();
+
+    // Si no existe sesión (raro), creamos array nuevo, si existe, usamos el historial
+    let history = session && session.conversation ? session.conversation : [];
+
+    // 2. Añadimos el nuevo mensaje (lo que haya pasado en el frontend)
+    history.push({
+      role: role, // 'assistant' (botones) o 'user' (click en sí/no)
+      content: content,
+      timestamp: new Date()
+    });
+
+    // 3. Guardamos la actualización
+    const { error } = await supabase
+      .from('chat_sessions')
+      .upsert({
+        session_id: session_id,
+        conversation: history,
+        updated_at: new Date()
+      });
+
+    if (error) throw error;
+
+    console.log(`💾 Log manual guardado para sesión ${session_id}: ${content}`);
+    res.json({ success: true });
+
+  } catch (error) {
+    console.error("❌ Error guardando log manual:", error);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
+/* ==========================================================================
    🚀 INICIO DEL SERVIDOR
    ========================================================================== */
 app.listen(PORT, async () => {
   console.log(`🚀 Server en http://localhost:${PORT}`);
   await loadIndexes(); // Carga la memoria al arrancar
-
 });
