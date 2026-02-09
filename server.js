@@ -810,6 +810,8 @@ app.post("/api/ai/search", async (req, res) => {
         return JSON.parse(str); 
     }
 
+    const rawContent = completion.choices[0].message.content;
+    console.log("RAW OPENAI RESPONSE:", rawContent);
     let aiContent;
     try {
         aiContent = extractJSON(rawContent);
@@ -940,4 +942,5 @@ app.listen(PORT, () => {
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 });
+
 
