@@ -704,24 +704,59 @@ app.post("/api/ai/search", async (req, res) => {
     }
 
     // ---------------------------------------------------------
-    // 4. 🖼️ PROCESADO FINAL (IMÁGENES Y VARIANTES)
+    // 4. 🖼️ PROCESADO FINAL BLINDADO (SANITIZACIÓN)
     // ---------------------------------------------------------
-    const seenIds = new Set();
-    const finalProducts = (aiContent.products || []).map(aiProd => {
-      const targetId = typeof aiProd === 'object' ? aiProd.id : aiProd;
-      const original = finalCandidatesList.find(p => String(p.id) === String(targetId));
-      if (!original || seenIds.has(original.id)) return null;
-      seenIds.add(original.id);
+    
+    // Función auxiliar para extraer JSON limpio si la IA mete texto antes
+    function extractJSON(str) {
+        const first = str.indexOf('{');
+        const last = str.lastIndexOf('}');
+        if (first !== -1 && last !== -1) {
+            return JSON.parse(str.substring(first, last + 1));
+        }
+        return JSON.parse(str); // Intento directo si falla la extracción
+    }
 
-      // Si la IA recomienda una variante específica (ej: color rojo), ponemos esa foto
-      let displayImage = original.image;
-      let displayUrlParams = "";
-      if (typeof aiProd === 'object' && aiProd.variant_id && original.variants) {
-        const v = original.variants.find(v => String(v.id) === String(aiProd.variant_id));
-        if (v) { if (v.image) displayImage = v.image; displayUrlParams = `?variant=${v.id}`; }
-      }
-      return { ...original, displayImage, displayUrlParams };
-    }).filter(Boolean);
+    let aiContent;
+    try {
+        // Usamos el extractor robusto por si GPT mete texto introductorio
+        aiContent = extractJSON(completion.choices[0].message.content);
+    } catch (err) {
+        console.error("❌ ERROR PARSEANDO JSON:", err);
+        aiContent = { reply: "He encontrado estos productos:", products: [], category: "ERROR_JSON" };
+    }
+
+    const finalProducts = (aiContent.products || []).map(aiProd => {
+        const targetId = typeof aiProd === 'object' ? aiProd.id : aiProd;
+        // Buscamos el producto original en memoria
+        const original = finalCandidatesList.find(p => String(p.id) === String(targetId));
+        
+        if (!original) return null;
+
+        // SANITIZACIÓN: Aseguramos que no haya campos NULL que rompan el frontend
+        const safeProduct = {
+            ...original,
+            title: original.title || "Producto Izas",
+            price: original.price || "0.00",
+            image: original.image || "https://cdn.shopify.com/s/files/1/0000/0000/t/1/assets/no-image.jpg", // Placeholder por si falla
+            variants: original.variants || [],
+            options: original.options || []
+        };
+
+        // Lógica de variante específica (si la IA recomienda un color concreto)
+        let displayImage = safeProduct.image;
+        let displayUrlParams = "";
+        
+        if (typeof aiProd === 'object' && aiProd.variant_id && safeProduct.variants.length > 0) {
+            const v = safeProduct.variants.find(v => String(v.id) === String(aiProd.variant_id));
+            if (v) { 
+                if (v.image) displayImage = v.image; 
+                displayUrlParams = `?variant=${v.id}`; 
+            }
+        }
+        
+        return { ...safeProduct, displayImage, displayUrlParams };
+    }).filter(Boolean); // Eliminamos los nulos
 
     // ---------------------------------------------------------
     // 5. 💾 GUARDADO EN SUPABASE (HISTORIAL)
@@ -813,4 +848,5 @@ app.listen(PORT, async () => {
   await loadIndexes(); // Carga la memoria al arrancar
 
 });
+
 
