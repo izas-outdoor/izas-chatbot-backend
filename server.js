@@ -690,19 +690,6 @@ app.post("/api/ai/search", async (req, res) => {
     // 2. Limpieza de emergencia (por si mete comillas de markdown)
     const cleanContent = rawContent.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/, "").trim();
 
-    let aiContent;
-    try {
-      aiContent = JSON.parse(cleanContent);
-    } catch (err) {
-      console.error("❌ ERROR PARSEANDO JSON:", err);
-      // Respuesta de emergencia para que el usuario no vea "Error de conexión"
-      aiContent = {
-        reply: "Lo siento, me he liado procesando tu solicitud. ¿Podrías repetirmela de otra forma?",
-        products: [],
-        category: "ERROR_JSON"
-      };
-    }
-
     // ---------------------------------------------------------
     // 4. 🖼️ PROCESADO FINAL BLINDADO (SANITIZACIÓN)
     // ---------------------------------------------------------
@@ -848,5 +835,6 @@ app.listen(PORT, async () => {
   await loadIndexes(); // Carga la memoria al arrancar
 
 });
+
 
 
