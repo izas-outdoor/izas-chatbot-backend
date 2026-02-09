@@ -717,103 +717,137 @@ app.post("/api/ai/search", async (req, res) => {
             temperature: 0.1,
             messages: [
                 {
-                    role: "system",
-                    content: `Eres el asistente virtual oficial de Izas Outdoor. Tu tono es cercano, profesional y aventurero.
+          role: "system",
+          content: `Eres el asistente virtual oficial de Izas Outdoor. Tu tono es cercano, profesional y aventurero.
 
-                    ⛔ REGLAS DE SEGURIDAD (IMPORTANTE):
-                    1. COMPETENCIA Y CANALES: Decathlon, Amazon... son partners. No mientas. Recomienda comprar en web oficial.
-                    2. CONOCIMIENTO: Usa "PRODUCTOS DISPONIBLES". Si no sabes, dilo.
+              ⛔ REGLAS DE SEGURIDAD (IMPORTANTE):
+              1. COMPETENCIA Y CANALES: Decathlon, Amazon... son partners. No mientas. Recomienda comprar en web oficial.
+              2. CONOCIMIENTO: Usa "PRODUCTOS DISPONIBLES". Si no sabes, dilo.
 
-                    3. GESTIÓN DE STOCK Y CONTEXTO VISUAL (¡MUY IMPORTANTE!):
-                       - Cuando informes del stock, sé muy breve y agrupa la información. Ejemplo: "En color Rojo lo tenemos disponible en las tallas S, M y L (¡de la L quedan las últimas!)."
-                       - Si el usuario pregunta "¿qué stock hay?", "¿y en talla L?" sin decir nombre, ASUME que es el producto "(EN PANTALLA)".
-                       - Si ves "🟠 ¡Últimas unidades!", genera sensación de urgencia.
-                    
-                    4. 👨‍👩‍👧‍👦 GESTIÓN DE FAMILIAS (EL "MODO CARRUSEL"):
-                       - ACTIVACIÓN: Si el usuario busca un nombre genérico (ej: "Anger", "Naluns") y ves varios resultados distintos.
-                       - ACCIÓN:
-                         1. JSON "reply": "He encontrado varias opciones para [Nombre]. Por favor, selecciona abajo el modelo exacto."
-                         2. ⚠️ JSON "products": [ID1, ID2, ID3...] <-- ¡OBLIGATORIO LLENARLO CON TODO LO ENCONTRADO!
-                       - PROHIBIDO: No des enlaces de tallas ni precios específicos en el texto si estás en este modo.
+              3. GESTIÓN DE STOCK Y CONTEXTO VISUAL (¡MUY IMPORTANTE!):
+                 - CRUCIAL: LEE EL CAMPO 'Stock:' DE CADA PRODUCTO.
+                 - Si dice "Tallas disponibles (S, M, L)", ENTONCES SÍ HAY STOCK. No inventes que está agotado.
+                 - Si un color tiene tallas y otro no, ESPECIFÍCALO CLARAMENTE.
+                 - Ejemplo correcto: "El modelo Konka en Azul tiene S y M. En Rojo está agotado."
+              
+              4. 👨‍👩‍👧‍👦 GESTIÓN DE FAMILIAS (EL "MODO CARRUSEL"):
+                 - ACTIVACIÓN: Si el usuario busca un nombre genérico (ej: "Anger", "Naluns") y ves varios resultados distintos.
+                 - ACCIÓN:
+                   1. JSON "reply": "He encontrado varias opciones para [Nombre]. Por favor, selecciona abajo el modelo exacto."
+                   2. ⚠️ JSON "products": [ID1, ID2, ID3...] <-- ¡OBLIGATORIO LLENARLO CON TODO LO ENCONTRADO!
+                 - PROHIBIDO: No des enlaces de tallas ni precios específicos en el texto si estás en este modo. Obliga al usuario a clicar en la tarjeta.
 
-                    5. 🚨 DERIVACIÓN A HUMANO (PRIORIDAD MÁXIMA):
-                       - Si piden "agente", "humano", "persona": NO INTENTES AYUDAR.
-                       - RESPUESTA OBLIGATORIA: "¡Claro! Escríbenos a info@izas-outdoor.com o llama al 976502040 dentro del horario laboral."
-                       - ETIQUETA: "DERIVACION_HUMANA"
+              5. 🚨 DERIVACIÓN A HUMANO (PRIORIDAD MÁXIMA):
+                 - Si piden "agente", "humano", "persona": NO INTENTES AYUDAR.
+                 - RESPUESTA OBLIGATORIA: "¡Claro! Escríbenos a info@izas-outdoor.com o llama al 976502040 dentro del horario laboral y te responderemos lo antes posible."
+                 - ETIQUETA: "DERIVACION_HUMANA"
+                 - ⚠️ IMPORTANTE: Mantén la estructura JSON estándar.
+                   Ejemplo: { "reply": "¡Claro! Escríbenos...", "category": "DERIVACION_HUMANA", "products": [] }
 
-                    --- MODOS DE RESPUESTA ---
-                    MODO A: ESCAPARATE (JSON "products": [IDs])
-                    MODO B: COMPARACIÓN / DETALLES
-                    MODO C: RASTREO DE PEDIDOS
+              6. 📏 GUÍA DE TALLAS (LÓGICA PRIORITARIA):
+                 - CASO A: ¿Hay VARIOS productos candidatos (ej: Anger P, Anger M)?
+                   -> 🛑 STOP. NO des enlace. Vuelve a la REGLA 4 (Muestra el carrusel y pide elegir).
+                 
+                 - CASO B: ¿Es un producto ÚNICO o ESPECÍFICO?
+                   -> 1. Busca el "Handle".
+                   -> 2. Genera enlace: "https://www.izas-outdoor.com/products/[HANDLE]?open_guide=true"
+                   -> 3. Texto: "Aquí tienes la guía directa. Se abrirá la tabla automáticamente."
+                   -> 4. JSON "products": [ID_DEL_PRODUCTO]
 
-                    --- DATOS ---
-                    ALERTA SEGURIDAD: ${securityWarning || "Ninguna"}
-                    DATOS PEDIDO LIVE: ${orderData || "N/A"}
-                    DATOS DE MARCA: ${BRAND_INFO}
-                    FAQs: ${faqResults.map(f => `P:${f.question} R:${f.answer}`).join("\n")}
-                    PRODUCTOS DISPONIBLES: ${productsContext}
+              7. 🕵️‍♂️ BÚSQUEDA CRUZADA DE TALLAS (¡CRÍTICO!):
+                 - Si el usuario pregunta "¿Hay talla XXL de la Konka?":
+                 - 🛑 NO mires solo el primer producto y digas "No".
+                 - ✅ REVISA TODOS los productos listados abajo.
+                 - Si el producto 1 no tiene, pero el producto 2 sí, responde: "Sí, la tengo disponible en talla XXL en color [Color del Producto 2]".
+                 
+              --- MODOS DE RESPUESTA ---
+              - IMPORTANTE: Si tu respuesta invita a ver "abajo" o "las opciones", el array "products" NO PUEDE ESTAR VACÍO.
+              MODO A: ESCAPARATE
+              - JSON "reply": Vende el producto.
+              - JSON "products": [IDs].ETIQUETA
 
-                    Responde JSON: { "reply": "...", "products": [...], "category": "ETIQUETA" }
-                    `
-                },
+              MODO B: COMPARACIÓN / DETALLES
+              - Explica usando datos técnicos y stock.
+
+              MODO C: RASTREO DE PEDIDOS (SEGURIDAD MÁXIMA)
+              - ⚠️ REGLA DE ORO: NECESITAS SIEMPRE Nº DE PEDIDO Y EMAIL.
+              - Si ves "FALTA_EMAIL" en la alerta: Responde: "Para poder informarte sobre el estado de tu pedido, por seguridad necesito que me confirmes el correo electrónico de compra."
+              - Si ves "FALTA_PEDIDO_ID": Pide el número.
+              
+              - Si ves "[DATOS_ENCONTRADOS]", USA ESTA PLANTILLA:
+                "📋 **Estado del pedido [ID]:**
+                • **Estado:** [Traduce FULFILLED/UNFULFILLED]
+                • **Transportista:** [CARRIER]
+                • **Tracking:** [TRACKING]
+                • **Enlace:** <a href='[LINK]' target='_blank'>Ver envío</a>
+                • **Artículos:** [ITEMS]"
+
+              --- DATOS ---
+              ALERTA SEGURIDAD: ${securityWarning || "Ninguna"}
+              DATOS PEDIDO LIVE: ${orderData || "N/A"}
+              DATOS DE MARCA: ${BRAND_INFO}
+              FAQs: ${faqResults.map(f => `P:${f.question} R:${f.answer}`).join("\n")}
+              PRODUCTOS DISPONIBLES (SI VES ALGO AQUÍ QUE COINCIDA, MÉTELO EN EL JSON): ${productsContext}
+
+              Responde JSON: { "reply": "...", "products": [...], "category": "ETIQUETA" }
+              ETIQUETAS PERMITIDAS: LOGISTICA, PRODUCTO, COMPARATIVA, ATENCION_CLIENTE, DERIVACION_HUMANA, OTRO.
+              `
+        },
                 ...history.slice(-2).map(m => ({ role: m.role, content: m.content })),
                 { role: "user", content: q }
             ]
         });
 
-        // ---------------------------------------------------------
-        // 4. 🖼️ PROCESADO FINAL BLINDADO (SANITIZACIÓN)
-        // ---------------------------------------------------------
-        const rawContent = completion.choices[0].message.content;
-        console.log("RAW OPENAI RESPONSE:", rawContent);
-
-        let aiContent;
-        try {
-            // Usamos el extractor robusto por si GPT mete texto introductorio
-            aiContent = extractJSON(rawContent);
-        } catch (err) {
-            console.error("❌ ERROR PARSEANDO JSON:", err);
-            aiContent = { 
-                reply: "Lo siento, me he liado procesando tu solicitud. ¿Podrías repetirmela de otra forma?", 
-                products: [], 
-                category: "ERROR_JSON" 
-            };
+    // ---------------------------------------------------------
+    // 4. 🖼️ PROCESADO FINAL BLINDADO (SANITIZACIÓN)
+    // ---------------------------------------------------------
+    function extractJSON(str) {
+        const first = str.indexOf('{');
+        const last = str.lastIndexOf('}');
+        if (first !== -1 && last !== -1) {
+            return JSON.parse(str.substring(first, last + 1));
         }
+        return JSON.parse(str); 
+    }
 
-        const seenIds = new Set();
-        const finalProducts = (aiContent.products || []).map(aiProd => {
-            const targetId = typeof aiProd === 'object' ? aiProd.id : aiProd;
-            
-            // Buscamos el producto original en memoria
-            const original = finalCandidatesList.find(p => String(p.id) === String(targetId));
-            
-            if (!original || seenIds.has(original.id)) return null;
-            seenIds.add(original.id);
+    let aiContent;
+    try {
+        aiContent = extractJSON(rawContent);
+    } catch (err) {
+        console.error("❌ ERROR PARSEANDO JSON:", err);
+        aiContent = { reply: "He encontrado estos productos:", products: [], category: "ERROR_JSON" };
+    }
 
-            // SANITIZACIÓN: Aseguramos que no haya campos NULL que rompan el frontend
-            const safeProduct = {
-                ...original,
-                title: original.title || "Producto Izas",
-                price: original.price || "0.00",
-                image: original.image || "https://cdn.shopify.com/s/files/1/0000/0000/t/1/assets/no-image.jpg", // Placeholder
-                variants: original.variants || [],
-                options: original.options || []
-            };
+    const seenIds = new Set();
+    const finalProducts = (aiContent.products || []).map(aiProd => {
+        const targetId = typeof aiProd === 'object' ? aiProd.id : aiProd;
+        const original = finalCandidatesList.find(p => String(p.id) === String(targetId));
+        
+        if (!original || seenIds.has(original.id)) return null;
+        seenIds.add(original.id);
 
-            // Lógica de variante específica (si la IA recomienda un color concreto)
-            let displayImage = safeProduct.image;
-            let displayUrlParams = "";
-            
-            if (typeof aiProd === 'object' && aiProd.variant_id && safeProduct.variants.length > 0) {
-                const v = safeProduct.variants.find(v => String(v.id) === String(aiProd.variant_id));
-                if (v) { 
-                    if (v.image) displayImage = v.image; 
-                    displayUrlParams = `?variant=${v.id}`; 
-                }
+        const safeProduct = {
+            ...original,
+            title: original.title || "Producto Izas",
+            price: original.price || "0.00",
+            image: original.image || "https://cdn.shopify.com/s/files/1/0000/0000/t/1/assets/no-image.jpg",
+            variants: original.variants || [],
+            options: original.options || []
+        };
+
+        let displayImage = safeProduct.image;
+        let displayUrlParams = "";
+        
+        if (typeof aiProd === 'object' && aiProd.variant_id && safeProduct.variants.length > 0) {
+            const v = safeProduct.variants.find(v => String(v.id) === String(aiProd.variant_id));
+            if (v) { 
+                if (v.image) displayImage = v.image; 
+                displayUrlParams = `?variant=${v.id}`; 
             }
-            
-            return { ...safeProduct, displayImage, displayUrlParams };
-        }).filter(Boolean); // Eliminamos los nulos
+        }
+        
+        return { ...safeProduct, displayImage, displayUrlParams };
+    }).filter(Boolean);
 
         // ---------------------------------------------------------
         // 5. 💾 GUARDADO EN SUPABASE (HISTORIAL)
@@ -906,3 +940,4 @@ app.listen(PORT, () => {
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 });
+
