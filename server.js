@@ -1,10 +1,15 @@
 /* ==========================================================================
-   🚀 SERVIDOR IZAS OUTDOOR CHATBOT - VERSIÓN MAESTRA (FULL READABLE)
+   🚀 SERVIDOR IZAS OUTDOOR CHATBOT - VERSIÓN BLINDADA (CON RETRIES)
    ==========================================================================
    Este servidor actúa como el "Cerebro Central".
    - Conecta con Shopify (Catálogo, Pedidos y Stock en Tiempo Real).
    - Conecta con OpenAI (Inteligencia y RAG).
    - Conecta con Supabase (Memoria a largo plazo).
+   
+   MEJORAS V2:
+   - Sistema de Reintentos (Retry) para evitar caídas por ECONNRESET.
+   - Arranque no bloqueante (Indexación en background).
+   - Sanitización de respuestas.
    ========================================================================== */
 
 import express from "express";
@@ -107,7 +112,6 @@ function normalizeQuery(query) {
     });
 
     // 3. 🔥 MEJORA TALLAS: Normalización XXL <-> 2XL
-    // Esto permite que si buscan "XXL" encontremos el "2XL" de Shopify
     q = q.replace(/\b(xxl|xxxl|xxxxl)\b/gi, match => {
         const m = match.toLowerCase();
         if (m === 'xxl') return '2xl';
@@ -139,7 +143,7 @@ function safeParse(value) {
     try { return JSON.parse(value); } catch { return value; }
 }
 
-// Extractor robusto de JSON (para cuando GPT mete texto antes o después)
+// Extractor robusto de JSON
 function extractJSON(str) {
     const first = str.indexOf('{');
     const last = str.lastIndexOf('}');
@@ -151,22 +155,46 @@ function extractJSON(str) {
 
 
 /* ==========================================================================
-   🛍️ CONEXIÓN CON SHOPIFY (GRAPHQL)
+   🛍️ CONEXIÓN CON SHOPIFY (GRAPHQL) - CON SISTEMA ANTICAÍDAS
    ========================================================================== */
 
-// Función genérica para hablar con la API de Shopify
-async function fetchGraphQL(query, variables = {}) {
-    const res = await fetch(`https://${SHOPIFY_STORE}/admin/api/2024-01/graphql.json`, {
-        method: "POST",
-        headers: {
-            "X-Shopify-Access-Token": ADMIN_TOKEN,
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ query, variables }),
-    });
-    const json = await res.json();
-    if (json.errors) console.error("❌ GraphQL Error:", json.errors);
-    return json.data;
+// 🔥 FUNCIÓN MEJORADA: Incluye sistema de reintentos (Retries)
+async function fetchGraphQL(query, variables = {}, retries = 3) {
+    const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/graphql.json`;
+    
+    for (let i = 0; i < retries; i++) {
+        try {
+            const res = await fetch(url, {
+                method: "POST",
+                headers: {
+                    "X-Shopify-Access-Token": ADMIN_TOKEN,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ query, variables }),
+                timeout: 10000 // 10 segundos máximo por petición
+            });
+            
+            if (!res.ok) {
+                throw new Error(`Shopify Error ${res.status}: ${res.statusText}`);
+            }
+
+            const json = await res.json();
+            if (json.errors) console.error("❌ GraphQL Error:", json.errors);
+            return json.data;
+
+        } catch (error) {
+            // Si es el último intento, fallamos de verdad
+            if (i === retries - 1) {
+                console.error(`❌ Fallo definitivo tras ${retries} intentos:`, error.message);
+                throw error;
+            }
+            
+            // Si no, esperamos un poco y reintentamos (Backoff exponencial)
+            const waitTime = 1000 * (i + 1); // 1s, 2s, 3s...
+            console.warn(`⚠️ Error red (${error.message}). Reintentando en ${waitTime}ms... (${i + 1}/${retries})`);
+            await new Promise(r => setTimeout(r, waitTime));
+        }
+    }
 }
 
 // 📦 RECUPERADOR DE PRODUCTOS: Descarga todo el catálogo para estudiarlo
@@ -178,7 +206,7 @@ async function getAllProducts() {
     // Consulta gigante para traer todo: Info, variantes, stock, precios, opciones...
     const query = `
     query getProducts($cursor: String) {
-      products(first: 50, after: $cursor, query: "status:active") {
+      products(first: 30, after: $cursor, query: "status:active") {
         pageInfo { hasNextPage }
         edges {
           cursor
@@ -203,55 +231,61 @@ async function getAllProducts() {
     }
     `;
 
-    while (hasNextPage) {
-        const data = await fetchGraphQL(query, { cursor });
-        if (!data || !data.products) {
-            console.error("❌ Error grave recuperando productos.");
-            break;
-        }
+    try {
+        while (hasNextPage) {
+            const data = await fetchGraphQL(query, { cursor });
+            if (!data || !data.products) {
+                console.error("❌ Error recuperando página de productos. Saltando...");
+                break;
+            }
 
-        const edges = data.products.edges;
+            const edges = data.products.edges;
 
-        edges.forEach(({ node }) => {
-            const cleanId = node.id.split("/").pop(); // Limpia el ID
+            edges.forEach(({ node }) => {
+                const cleanId = node.id.split("/").pop(); // Limpia el ID
 
-            // Procesamos las variantes para guardarlas limpias
-            const variantsClean = node.variants.edges.map(v => ({
-                id: (v.node.id || "").split("/").pop(),
-                title: v.node.title,
-                price: v.node.price,
-                image: v.node.image?.url || "",
-                availableForSale: v.node.availableForSale,
-                inventoryQuantity: v.node.inventoryQuantity,
-                selectedOptions: v.node.selectedOptions
-            }));
+                // Procesamos las variantes para guardarlas limpias
+                const variantsClean = node.variants.edges.map(v => ({
+                    id: (v.node.id || "").split("/").pop(),
+                    title: v.node.title,
+                    price: v.node.price,
+                    image: v.node.image?.url || "",
+                    availableForSale: v.node.availableForSale,
+                    inventoryQuantity: v.node.inventoryQuantity,
+                    selectedOptions: v.node.selectedOptions
+                }));
 
-            products.push({
-                id: cleanId,
-                title: node.title,
-                handle: node.handle,
-                description: node.description,
-                body_html: node.descriptionHtml,
-                productType: node.productType,
-                price: node.variants.edges[0]?.node.price || "Consultar",
-                tags: node.tags,
-                image: node.images.edges[0]?.node.url || "",
-                options: node.options.map(o => ({ name: o.name, values: o.values })),
-                variants: variantsClean,
-                metafields: Object.fromEntries(
-                    node.metafields.edges.map(m => [`${m.node.namespace}.${m.node.key}`, safeParse(m.node.value)])
-                ),
+                products.push({
+                    id: cleanId,
+                    title: node.title,
+                    handle: node.handle,
+                    description: node.description,
+                    body_html: node.descriptionHtml,
+                    productType: node.productType,
+                    price: node.variants.edges[0]?.node.price || "Consultar",
+                    tags: node.tags,
+                    image: node.images.edges[0]?.node.url || "",
+                    options: node.options.map(o => ({ name: o.name, values: o.values })),
+                    variants: variantsClean,
+                    metafields: Object.fromEntries(
+                        node.metafields.edges.map(m => [`${m.node.namespace}.${m.node.key}`, safeParse(m.node.value)])
+                    ),
+                });
             });
-        });
 
-        hasNextPage = data.products.pageInfo.hasNextPage;
-        if (hasNextPage) cursor = edges[edges.length - 1].cursor;
+            hasNextPage = data.products.pageInfo.hasNextPage;
+            if (hasNextPage) cursor = edges[edges.length - 1].cursor;
+            
+            // Pequeña pausa para no saturar la API
+            // await new Promise(r => setTimeout(r, 200)); 
+        }
+    } catch (e) {
+        console.error("⚠️ Error durante getAllProducts (Carga parcial):", e.message);
     }
     return products;
 }
 
 // ⚡ LIVE STOCK CHECK: Actualiza el stock de productos específicos en tiempo real
-// 🔥 ESTA FUNCIÓN ES CRÍTICA PARA QUE NO INVENTE STOCK
 async function getLiveStockForProducts(products) {
     if (!products || products.length === 0) return products;
 
@@ -411,35 +445,59 @@ function buildAIText(product) {
 
 // Carga los productos al iniciar el servidor (Caché -> O descarga nueva)
 async function loadIndexes() {
+    // 1. Intentamos cargar de caché primero para arrancar rápido
     if (fs.existsSync(INDEX_FILE)) {
-        console.log("📦 Cargando productos desde caché...");
+        console.log("📦 Cargando productos desde caché (arranque rápido)...");
         try {
             aiIndex = JSON.parse(fs.readFileSync(INDEX_FILE, "utf8"));
-        } catch (e) { aiIndex = []; }
+        } catch (e) { 
+            console.error("⚠️ Caché corrupta, se ignorará.");
+            aiIndex = []; 
+        }
     }
 
+    // 2. Si no hay datos (o queremos refrescar), descargamos de Shopify
     if (aiIndex.length === 0) {
         console.log("🤖 Indexando productos en Shopify (esto puede tardar)...");
-        const products = await getAllProducts();
-        for (const p of products) {
-            // Vectorizamos cada producto para que la IA lo entienda
-            const emb = await openai.embeddings.create({ model: "text-embedding-3-large", input: buildAIText(p) });
-            aiIndex.push({ ...p, embedding: emb.data[0].embedding });
+        try {
+            const products = await getAllProducts();
+            
+            if (products.length > 0) {
+                // Limpiamos el índice anterior antes de llenar
+                const tempIndex = [];
+                for (const p of products) {
+                    // Vectorizamos cada producto para que la IA lo entienda
+                    const emb = await openai.embeddings.create({ model: "text-embedding-3-large", input: buildAIText(p) });
+                    tempIndex.push({ ...p, embedding: emb.data[0].embedding });
+                }
+                aiIndex = tempIndex; // Actualizamos la memoria
+                
+                try { 
+                    fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex)); 
+                    console.log("💾 Índice guardado en disco.");
+                } catch (e) { console.error("⚠️ No se pudo guardar caché en disco (read-only system?)"); }
+            } else {
+                console.warn("⚠️ Advertencia: Shopify devolvió 0 productos.");
+            }
+        } catch (error) {
+            console.error("❌ ERROR CRÍTICO INDEXANDO:", error);
+            // No hacemos throw para que el servidor no se caiga
         }
-        try { fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex)); } catch (e) { }
     }
-    console.log(`✅ Productos listos: ${aiIndex.length}`);
+    console.log(`✅ Productos listos en memoria: ${aiIndex.length}`);
 
     // Carga de FAQs
     if (fs.existsSync(FAQ_FILE)) {
-        const rawFaqs = JSON.parse(fs.readFileSync(FAQ_FILE, "utf8"));
-        faqIndex = [];
-        console.log("🤖 Indexando FAQs...");
-        for (const f of rawFaqs) {
-            const emb = await openai.embeddings.create({ model: "text-embedding-3-large", input: f.question });
-            faqIndex.push({ ...f, embedding: emb.data[0].embedding });
-        }
-        console.log(`✅ FAQs listas: ${faqIndex.length}`);
+        try {
+            const rawFaqs = JSON.parse(fs.readFileSync(FAQ_FILE, "utf8"));
+            faqIndex = [];
+            console.log("🤖 Indexando FAQs...");
+            for (const f of rawFaqs) {
+                const emb = await openai.embeddings.create({ model: "text-embedding-3-large", input: f.question });
+                faqIndex.push({ ...f, embedding: emb.data[0].embedding });
+            }
+            console.log(`✅ FAQs listas: ${faqIndex.length}`);
+        } catch(e) { console.error("Error cargando FAQs:", e); }
     }
 }
 
@@ -631,7 +689,6 @@ app.post("/api/ai/search", async (req, res) => {
         let finalCandidatesList = Array.from(combinedCandidates.values());
 
         // 🔥🔥🔥 LIVE STOCK CHECK: Actualizamos datos con Shopify en TIEMPO REAL 🔥🔥🔥
-        // Esto evita que el bot diga que hay stock si se vendió hace 10 minutos
         finalCandidatesList = await getLiveStockForProducts(finalCandidatesList);
 
         // Generamos el texto que leerá la IA
@@ -764,7 +821,6 @@ app.post("/api/ai/search", async (req, res) => {
         const currentSessionId = session_id || "anonimo";
         
         // Enriquecemos el log del asistente con los nombres de los productos recomendados
-        // Esto permite que en el futuro el bot sepa qué "Konka" recomendó
         let enrichedReply = aiContent.reply;
         if (finalProducts.length > 0) {
             const productNames = finalProducts.map(p => p.title).join(", ");
@@ -809,24 +865,20 @@ app.post("/api/chat/log", async (req, res) => {
     if (!session_id || !role || !content) return res.status(400).json({ error: "Faltan datos" });
 
     try {
-        // 1. Recuperamos la conversación actual
         const { data: session } = await supabase
             .from('chat_sessions')
             .select('conversation')
             .eq('session_id', session_id)
             .single();
 
-        // Si no existe sesión, creamos array nuevo; si existe, usamos el historial
         let history = session && session.conversation ? session.conversation : [];
 
-        // 2. Añadimos el nuevo mensaje
         history.push({
             role: role, // 'assistant' (botones) o 'user' (click en sí/no)
             content: content,
             timestamp: new Date()
         });
 
-        // 3. Guardamos la actualización
         const { error } = await supabase
             .from('chat_sessions')
             .upsert({
@@ -849,7 +901,8 @@ app.post("/api/chat/log", async (req, res) => {
 /* ==========================================================================
    🚀 INICIO DEL SERVIDOR
    ========================================================================== */
-app.listen(PORT, async () => {
+app.listen(PORT, () => {
     console.log(`🚀 Server en http://localhost:${PORT}`);
-    await loadIndexes(); // Carga la memoria al arrancar
+    // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
+    loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 });
