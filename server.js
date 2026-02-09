@@ -177,7 +177,7 @@ async function getAllProducts() {
           descriptionHtml 
           options { name values }
           # DATOS DE STOCK EN TIEMPO REAL
-          variants(first: 50) {
+          variants(first: 100) {
             edges {
               node {
                 id title price availableForSale inventoryQuantity
@@ -790,4 +790,5 @@ app.post("/api/chat/log", async (req, res) => {
 app.listen(PORT, async () => {
   console.log(`🚀 Server en http://localhost:${PORT}`);
   await loadIndexes(); // Carga la memoria al arrancar
+
 });
