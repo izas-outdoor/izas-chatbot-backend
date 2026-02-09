@@ -513,7 +513,7 @@ async function loadIndexes() {
 // 🧹 REFINAMIENTO: Traduce "quiero unos pantalones" a una query técnica
 async function refineQuery(userQuery, history) {
     const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: "gpt-4o",
         messages: [
             {
                 role: "system",
@@ -721,7 +721,7 @@ app.post("/api/ai/search", async (req, res) => {
         // 3. 🗣️ GENERACIÓN DE RESPUESTA (OPENAI)
         // ---------------------------------------------------------
         const completion = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
+            model: "gpt-4o",
             response_format: { type: "json_object" },
             temperature: 0.1,
             messages: [
@@ -922,3 +922,4 @@ app.listen(PORT, async () => {
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 });
+
