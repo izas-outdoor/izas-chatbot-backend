@@ -108,6 +108,17 @@ function normalizeQuery(query) {
     }
   });
 
+  // 3. Normalización de Tallas (XXL -> 2XL, etc.)
+  q = q.replace(/\b(xxl|xxxl|xxxxl)\b/gi, match => {
+      if (match.toLowerCase() === 'xxl') return '2xl';
+      if (match.toLowerCase() === 'xxxl') return '3xl';
+      if (match.toLowerCase() === 'xxxxl') return '4xl';
+      return match;
+  });
+  
+  // También a la inversa por si acaso buscan "2xl" y en Shopify es "XXL"
+  // (Aunque lo estándar suele ser unificar a uno, esto ayuda a la búsqueda semántica)
+  
   return q;
 }
 
@@ -716,10 +727,20 @@ app.post("/api/ai/search", async (req, res) => {
     // 5. 💾 GUARDADO EN SUPABASE (HISTORIAL)
     // ---------------------------------------------------------
     const currentSessionId = session_id || "anonimo";
-    const newInteraction = [
-      { role: "user", content: q, timestamp: new Date() },
-      { role: "assistant", content: aiContent.reply, timestamp: new Date() }
-    ];
+    // Enriquecemos el log del asistente con los nombres de los productos recomendados
+   let enrichedReply = aiContent.reply;
+   
+   if (finalProducts.length > 0) {
+       const productNames = finalProducts.map(p => p.title).join(", ");
+       // Añadimos una nota oculta o visible en el log para que la IA tenga contexto en el futuro
+       // (Esto no se muestra al usuario, pero se guarda en la memoria del chat)
+       enrichedReply += `\n[CONTEXTO SISTEMA: Productos mostrados: ${productNames}]`;
+   }
+   
+   const newInteraction = [
+     { role: "user", content: q, timestamp: new Date() },
+     { role: "assistant", content: enrichedReply, timestamp: new Date() } // Guardamos la versión enriquecida
+   ];
     const fullHistoryToSave = [...(history || []), ...newInteraction];
 
     supabase.from('chat_sessions').upsert({
@@ -792,3 +813,4 @@ app.listen(PORT, async () => {
   await loadIndexes(); // Carga la memoria al arrancar
 
 });
+
