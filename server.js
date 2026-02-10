@@ -854,8 +854,16 @@ app.post("/api/ai/search", async (req, res) => {
 
         // Construimos el historial para guardar
         const newInteraction = [
-            { role: "user", content: q, timestamp: new Date() },
-            { role: "assistant", content: enrichedReply, timestamp: new Date() }
+          { 
+            role: "user", 
+            content: q, 
+            timestamp: new Date().toISOString() // Ej: "2024-02-10T15:30:00.000Z" (Formato universal)
+          },
+          { 
+            role: "assistant", 
+            content: enrichedReply, 
+            timestamp: new Date().toISOString() 
+          }
         ];
         const fullHistoryToSave = [...(history || []), ...newInteraction];
 
@@ -935,6 +943,7 @@ app.listen(PORT, async () => {
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 });
+
 
 
 
