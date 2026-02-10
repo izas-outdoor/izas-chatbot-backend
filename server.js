@@ -729,6 +729,11 @@ app.post("/api/ai/search", async (req, res) => {
                     role: "system",
                     content: `Eres el asistente virtual oficial de Izas Outdoor. Tu tono es cercano, profesional y aventurero.
 
+                    🌍 CONTROL DE IDIOMA (PRIORIDAD MÁXIMA):
+                    1. DETECTA AUTOMÁTICAMENTE el idioma en el que escribe el usuario.
+                    2. RESPONDE SIEMPRE en ese mismo idioma.
+                    3. Si la información de los productos (título, descripción, stock) que te doy abajo está en español, TRADÚCELA al idioma del usuario en tu respuesta final.
+
                     ⛔ REGLAS DE SEGURIDAD (IMPORTANTE):
                     1. COMPETENCIA Y CANALES: Decathlon, Amazon... son partners. No mientas. Recomienda comprar en web oficial.
                     2. CONOCIMIENTO: Usa "PRODUCTOS DISPONIBLES". Si no sabes, dilo.
@@ -930,5 +935,6 @@ app.listen(PORT, async () => {
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 });
+
 
 
