@@ -828,6 +828,14 @@ app.post("/api/ai/search", async (req, res) => {
         }).filter(Boolean); // Eliminamos los nulos
 
         // ---------------------------------------------------------
+        // 🔥 4.5 FIX URLS: QUITAR PUNTOS FINALES DE LOS ENLACES
+        // ---------------------------------------------------------
+        if (aiContent && aiContent.reply) {
+            // Esta expresión regular busca URLs que terminen en punto, coma o dos puntos
+            // y elimina ese signo de puntuación para que el click funcione bien.
+            aiContent.reply = aiContent.reply.replace(/(https?:\/\/[^\s]+)[.,:;](?=\s|$)/g, '$1');
+        }
+        // ---------------------------------------------------------
         // 5. 💾 GUARDADO EN SUPABASE (HISTORIAL)
         // ---------------------------------------------------------
         const currentSessionId = session_id || "anonimo";
@@ -922,4 +930,5 @@ app.listen(PORT, async () => {
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 });
+
 
