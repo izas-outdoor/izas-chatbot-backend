@@ -156,7 +156,7 @@ function extractJSON(str) {
 }
 
 
-/* ==========================================================================
+   /* ==========================================================================
    🛍️ CONEXIÓN CON SHOPIFY (GRAPHQL) - CON SISTEMA ANTICAÍDAS
    ========================================================================== */
 
@@ -1008,6 +1008,7 @@ app.listen(PORT, async () => {
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 });
+
 
 
 
