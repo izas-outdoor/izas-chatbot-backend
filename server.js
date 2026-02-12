@@ -521,7 +521,10 @@ async function refineQuery(userQuery, history) {
                 TU OBJETIVO: Generar la cadena de búsqueda perfecta para una base de datos vectorial.
 
                 REGLAS DE ORO:
-                1. Contexto: Mira el historial. Si el usuario dice "quiero esa", busca el nombre del producto anterior.
+                1. Contexto: Mira el historial. 
+                   - Si el usuario dice "quiero esa", busca el nombre del producto anterior.
+                   - Si el historial reciente tiene una duda técnica (ej: "¿Tienen capucha desmontable?") y el usuario ahora dice una categoría (ej: "Chaquetas"), TU BÚSQUEDA DEBE SER: "Chaquetas con capucha desmontable".
+                   - ¡FUSIONA SIEMPRE CATEGORÍA ACTUAL + REQUISITO ANTERIOR!
                 
                 2. 🕵️‍♂️ PRECISIÓN vs VARIEDAD:
                    - Si el usuario especifica "V2", "V3", "V4": INCLÚYELO (ej: "Naluns M V2 guia tallas").
@@ -728,7 +731,22 @@ app.post("/api/ai/search", async (req, res) => {
                 {
                     role: "system",
                     content: `Eres el asistente virtual oficial de Izas Outdoor. Tu tono es cercano, profesional y aventurero.
-                        
+
+                   🔥 REGLA DEL SELECTOR DE CATEGORÍA (NUEVA Y CRÍTICA):
+                    1. Si el usuario pide una característica técnica (ej: "capucha desmontable", "impermeable") PERO NO ESPECIFICA EL TIPO DE PRENDA (no dice "chaqueta", "pantalón", etc.):
+                       - 🛑 NO BUSQUES PRODUCTOS NI INVENTES.
+                       - Debes devolver una lista de botones con categorías posibles.
+                       - JSON: { 
+                           "reply": "Para esa característica tengo varias opciones. ¿Qué tipo de prenda prefieres?", 
+                           "category": "SELECTOR", 
+                           "choices": ["Chaquetas", "Pantalones", "Softshells", "Chalecos"] 
+                         }
+                       - "choices" debe ser un array con las categorías lógicas de Izas.
+
+                    🔥 REGLA DE FILTRADO ESTRICTO:
+                    - Si el usuario YA ha dicho la categoría (o ha pulsado un botón), LEE LAS DESCRIPCIONES de abajo.
+                    - Si un producto NO tiene la característica pedida (ej: pide "desmontable" y pone "fija"), NO LO INCLUYAS en el JSON.
+                    
                     🌍 CONTROL DE IDIOMA (PRIORIDAD MÁXIMA):
                     1. DETECTA AUTOMÁTICAMENTE el idioma en el que escribe el usuario.
                     2. RESPONDE SIEMPRE en ese mismo idioma.
@@ -769,7 +787,7 @@ app.post("/api/ai/search", async (req, res) => {
                     FAQs: ${faqResults.map(f => `P:${f.question} R:${f.answer}`).join("\n")}
                     PRODUCTOS DISPONIBLES: ${productsContext}
 
-                    Responde JSON: { "reply": "...", "products": [...], "category": "ETIQUETA" }
+                    Responde JSON: { "reply": "...", "products": [...], "category": "ETIQUETA", "choices": [...] }
                     `
                 },
                 ...history.slice(-2).map(m => ({ role: m.role, content: m.content })),
@@ -880,7 +898,8 @@ app.post("/api/ai/search", async (req, res) => {
         res.json({ 
             products: finalProducts, 
             text: aiContent.reply, 
-            isSizeContext: isSizeContext 
+            isSizeContext: isSizeContext,
+           choices: aiContent.choices || []
         });
 
     } catch (error) {
@@ -889,7 +908,7 @@ app.post("/api/ai/search", async (req, res) => {
     }
 });
 
-/* ==========================================================================
+   /* ==========================================================================
    📝 ENDPOINT PARA GUARDAR LOGS MANUALES (Feedback, Botones, etc.)
    ========================================================================== */
 app.post("/api/chat/log", async (req, res) => {
@@ -943,6 +962,7 @@ app.listen(PORT, async () => {
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 });
+
 
 
 
