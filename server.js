@@ -132,7 +132,7 @@ function cleanText(text) {
         .replace(/<[^>]*>?/gm, " ") // Quita etiquetas <div>, <p>...
         .replace(/\s+/g, " ")       // Quita espacios dobles
         .trim()
-        .substring(0, 600);         // Corta para no gastar muchos tokens
+        .substring(0, 1000);        
 }
 
 // Cálculo matemático para ver similitud entre vectores (Búsqueda Semántica)
@@ -584,11 +584,43 @@ function formatStockForAI(variants) {
     return stockInfo;
 }
 
+   /* ==========================================================================
+   🔍 MOTOR DE COINCIDENCIA TÉCNICA (NUEVO)
+   ========================================================================== */
+   function getTechnicalScore(query, productDesc) {
+       const descLower = productDesc.toLowerCase();
+       const queryLower = query.toLowerCase();
+       let techScore = 0;
+   
+       // Mapa de sinónimos técnicos
+       const techFeatures = [
+           { triggers: ["desmontable", "extraíble", "extraible", "amovible", "quitar capucha"], points: 10.0 },
+           { triggers: ["esconder", "oculta", "enrollable"], points: 5.0 },
+           { triggers: ["impermeable", "waterproof", "awps"], points: 3.0 },
+           { triggers: ["termosellad"], points: 3.0 },
+           { triggers: ["gore-tex"], points: 5.0 }
+       ];
+   
+       techFeatures.forEach(feature => {
+           // Si el usuario busca alguna de las triggers
+           const userWantsFeature = feature.triggers.some(t => queryLower.includes(t));
+           
+           if (userWantsFeature) {
+               // Y el producto tiene alguna de las triggers en su descripción
+               const productHasFeature = feature.triggers.some(t => descLower.includes(t));
+               if (productHasFeature) {
+                   techScore += feature.points;
+               }
+           }
+       });
+   
+       return techScore;
+   }
 
-/* ==========================================================================
+   /* ==========================================================================
    🚪 ENDPOINT PRINCIPAL (/api/ai/search)
    ========================================================================== */
-app.post("/api/ai/search", async (req, res) => {
+   app.post("/api/ai/search", async (req, res) => {
     const { q, history, visible_ids, session_id } = req.body;
     if (!q) return res.status(400).json({ error: "Falta query" });
 
@@ -661,29 +693,23 @@ app.post("/api/ai/search", async (req, res) => {
         const versionMatch = optimizedQuery.match(/\b(v\d+|ii|iii)\b/i);
         const targetVersion = versionMatch ? versionMatch[0].toLowerCase() : null;
 
-        const searchResults = aiIndex
-            .map(p => {
-                let score = cosineSimilarity(vector, p.embedding);
-                const titleLower = p.title.toLowerCase();
-                const queryLower = optimizedQuery.toLowerCase().trim();
+        const searchResults = aiIndex.map(p => {
+            // A. Score Vectorial (Base)
+            let score = cosineSimilarity(vector, p.embedding);
+            
+            // B. Score por Título
+            const titleLower = p.title.toLowerCase();
+            const queryLower = optimizedQuery.toLowerCase().trim();
+            if (queryLower.split(" ").some(kw => kw.length > 3 && titleLower.includes(kw))) score += 0.3;
+            if (targetVersion) score += titleLower.includes(targetVersion) ? 0.4 : -0.3;
 
-                // Boost por coincidencia de palabras clave
-                const coreKeywords = queryLower.split(" ").filter(w => w.length > 3);
-                const matchesCore = coreKeywords.some(kw => titleLower.includes(kw));
-                if (matchesCore) score += 0.3;
+            // C. 🔥 SCORE TÉCNICO (EL SALVAVIDAS)
+            // Esto inyecta puntos masivos si la descripción coincide con la feature buscada
+            const fullDescription = (p.body_html || "") + " " + (p.description || "");
+            score += getTechnicalScore(queryLower, fullDescription);
 
-                // Penalización/Boost por versión (V2, V3...)
-                if (targetVersion) {
-                    if (titleLower.includes(targetVersion)) {
-                        score += 0.4;
-                    } else {
-                        score -= 0.3;
-                    }
-                }
-                return { ...p, score };
-            })
-            .sort((a, b) => b.score - a.score)
-            .slice(0, 8); // Top 8 candidatos
+            return { ...p, score };
+        }).sort((a, b) => b.score - a.score).slice(0, 8); // Nos quedamos con los 8 mejores
 
         // Buscamos FAQs similares
         const faqResults = faqIndex
@@ -691,12 +717,9 @@ app.post("/api/ai/search", async (req, res) => {
             .sort((a, b) => b.score - a.score)
             .slice(0, 2);
 
-        // Unimos los resultados
         const combinedCandidates = new Map();
-        contextProducts.forEach(p => combinedCandidates.set(String(p.id), p));
-        searchResults.forEach(p => {
-            if (combinedCandidates.size < 10) combinedCandidates.set(String(p.id), p);
-        });
+        if (visible_ids) aiIndex.filter(p => visible_ids.map(String).includes(String(p.id))).forEach(p => combinedCandidates.set(String(p.id), p));
+        searchResults.forEach(p => { if (combinedCandidates.size < 10) combinedCandidates.set(String(p.id), p); });
         
         let finalCandidatesList = Array.from(combinedCandidates.values());
 
@@ -715,6 +738,7 @@ app.post("/api/ai/search", async (req, res) => {
             return `PRODUCTO ${isVisible}:
             - ID: ${p.id}
             - Título: ${p.title}
+            - Desc: ${cleanDescription}
             - Precio: ${p.price} €
             - Colores: ${officialColors}
             - Stock: ${stockText}`;
@@ -732,17 +756,17 @@ app.post("/api/ai/search", async (req, res) => {
                     role: "system",
                     content: `Eres el asistente virtual oficial de Izas Outdoor. Tu tono es cercano, profesional y aventurero.
 
-                   🔥 REGLA 1: SELECTOR DE CATEGORÍA (ESTRICTO):
+                   🔥 REGLA 1: SELECTOR DE CATEGORÍA (CONDICIONAL):
                     - Si el usuario pide una característica (ej: "capucha desmontable") Y NO MENCIONA NINGUNA PRENDA:
                       -> Devuelve "choices": ["Chaquetas", "Pantalones", "Chalecos"].
                     - ⛔ EXCEPCIÓN: Si el usuario dice "Abrigo", "Chaqueta", "Parka", "Anorak", "Cazadora" -> NO SAQUES SELECTOR. Busca productos.
 
-                    🔥 REGLA 2: EL PORTERO (FILTRADO TÉCNICO):
-                    - Si el usuario pide "capucha desmontable/extraíble":
+                    🔥 REGLA 2: EL PORTERO (FILTRADO TÉCNICO ESTRICTO):
+                    - Si el usuario pide "capucha desmontable" (o extraíble/amovible):
                       1. LEE la 'Desc' de cada producto.
-                      2. Si NO encuentras la palabra "desmontable", "extraíble" o similar en la descripción -> ❌ ELIMINA ESE PRODUCTO.
-                      3. ¡Es mejor decir que no hay a mostrar uno con capucha fija!
-                    - Si tras filtrar no queda ninguno, di: "Lo siento, no tengo chaquetas con esa característica exacta en stock."
+                      2. Si la descripción NO contiene palabras como "desmontable", "extraíble" o "amovible" -> ❌ ELIMINA ESE PRODUCTO.
+                      3. Solo muestra productos que CUMPLAN el requisito.
+                    - Si tras filtrar no queda ninguno, di: "Lo siento, no tengo chaquetas con esa característica exacta."
                     
                     🌍 CONTROL DE IDIOMA (PRIORIDAD MÁXIMA):
                     1. DETECTA AUTOMÁTICAMENTE el idioma en el que escribe el usuario.
@@ -959,6 +983,7 @@ app.listen(PORT, async () => {
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 });
+
 
 
 
