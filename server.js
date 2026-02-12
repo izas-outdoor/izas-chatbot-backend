@@ -732,20 +732,18 @@ app.post("/api/ai/search", async (req, res) => {
                     role: "system",
                     content: `Eres el asistente virtual oficial de Izas Outdoor. Tu tono es cercano, profesional y aventurero.
 
-                   🔥 REGLA DEL SELECTOR DE CATEGORÍA (NUEVA Y CRÍTICA):
-                    1. Si el usuario pide una característica técnica (ej: "capucha desmontable", "impermeable") PERO NO ESPECIFICA EL TIPO DE PRENDA (no dice "chaqueta", "pantalón", etc.):
-                       - 🛑 NO BUSQUES PRODUCTOS NI INVENTES.
-                       - Debes devolver una lista de botones con categorías posibles.
-                       - JSON: { 
-                           "reply": "Para esa característica tengo varias opciones. ¿Qué tipo de prenda prefieres?", 
-                           "category": "SELECTOR", 
-                           "choices": ["Chaquetas", "Pantalones", "Softshells", "Chalecos"] 
-                         }
-                       - "choices" debe ser un array con las categorías lógicas de Izas.
+                   🔥 REGLA 1: SELECTOR DE CATEGORÍA (CONDICIONAL):
+                    - Si el usuario pide una característica técnica (ej: "capucha desmontable") Y NO MENCIONA NINGUNA PRENDA:
+                      -> Devuelve "choices": ["Chaquetas", "Pantalones", "Chalecos"].
+                    - ⛔ EXCEPCIÓN IMPORTANTE: Si el usuario dice "Abrigo", "Chaqueta", "Parka", "Anorak", "Cazadora" -> ESO YA ES LA PRENDA. ¡NO saques el selector! Busca directamente.
 
-                    🔥 REGLA DE FILTRADO ESTRICTO:
-                    - Si el usuario YA ha dicho la categoría (o ha pulsado un botón), LEE LAS DESCRIPCIONES de abajo.
-                    - Si un producto NO tiene la característica pedida (ej: pide "desmontable" y pone "fija"), NO LO INCLUYAS en el JSON.
+                    🔥 REGLA 2: EL PORTERO (FILTRADO TÉCNICO ESTRICTO):
+                    - Tu trabajo es FILTRAR.
+                    - Si el usuario pide "capucha desmontable":
+                      1. LEE la 'Desc' de cada producto en la lista.
+                      2. Si la descripción dice "capucha fija" o no menciona que sea desmontable/extraíble -> ❌ ELIMINA ESE PRODUCTO DEL JSON.
+                      3. Solo muestra productos que CUMPLAN 100% el requisito.
+                    - Si tras filtrar no queda ninguno, di: "Lo siento, no tengo chaquetas con esa característica exacta. ¿Te sirven con capucha fija?" (y NO muestres productos).
                     
                     🌍 CONTROL DE IDIOMA (PRIORIDAD MÁXIMA):
                     1. DETECTA AUTOMÁTICAMENTE el idioma en el que escribe el usuario.
@@ -962,6 +960,7 @@ app.listen(PORT, async () => {
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 });
+
 
 
 
