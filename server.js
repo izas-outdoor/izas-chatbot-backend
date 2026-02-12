@@ -702,8 +702,8 @@ function formatStockForAI(variants) {
         const searchResults = aiIndex.map(p => {
             let score = cosineSimilarity(vector, p.embedding);
 
-           const titleLower = p.title.toLowerCase();
-            const descLower = (p.body_html || "").toLowerCase() + " " + (p.description || "").toLowerCase() + " " + p.title.toLowerCase();
+            const titleLower = (p.title || "").toLowerCase();
+            const descLower = (p.body_html || "").toLowerCase() + " " + (p.description || "").toLowerCase() + " " + titleLower;
             const typeLower = (p.productType || "").toLowerCase();
             const tagsLower = (p.tags || []).join(" ").toLowerCase();
 
@@ -1000,6 +1000,7 @@ app.listen(PORT, async () => {
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 });
+
 
 
 
