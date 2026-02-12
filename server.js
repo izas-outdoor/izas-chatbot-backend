@@ -676,7 +676,6 @@ function formatStockForAI(variants) {
         // ---------------------------------------------------------
         const normalizedQuery = normalizeQuery(q); // Aplicamos normalización (Tallas XXL->2XL)
         const optimizedQuery = await refineQuery(normalizedQuery, history || []);
-        
         if (aiIndex.length === 0) await loadIndexes();
 
         // Filtramos productos que el usuario ya tiene en pantalla
@@ -689,27 +688,49 @@ function formatStockForAI(variants) {
         const embResponse = await openai.embeddings.create({ model: "text-embedding-3-large", input: optimizedQuery });
         const vector = embResponse.data[0].embedding;
 
-        // Scoring y Lógica de Versiones
-        const versionMatch = optimizedQuery.match(/\b(v\d+|ii|iii)\b/i);
-        const targetVersion = versionMatch ? versionMatch[0].toLowerCase() : null;
+        // --- 🕵️‍♂️ LÓGICA DE FILTRADO TÉCNICO ("EL MARTILLO") ---
+        // Definimos triggers: si la query tiene X, el producto DEBE tener Y.
+        
+        const queryLower = optimizedQuery.toLowerCase();
+        
+        // 1. Detección de intención "DESMONTABLE"
+        const wantsDetachable = ["desmontable", "extraíble", "extraible", "amovible", "quitar"].some(w => queryLower.includes(w));
+        
+        // 2. Detección de intención "PRENDA" (Evitar Gorras si piden Abrigos)
+        const wantsGarment = ["chaqueta", "abrigo", "parka", "anorak", "cazadora"].some(w => queryLower.includes(w));
 
         const searchResults = aiIndex.map(p => {
-            // A. Score Vectorial (Base)
             let score = cosineSimilarity(vector, p.embedding);
             
-            // B. Score por Título
-            const titleLower = p.title.toLowerCase();
-            const queryLower = optimizedQuery.toLowerCase().trim();
-            if (queryLower.split(" ").some(kw => kw.length > 3 && titleLower.includes(kw))) score += 0.3;
-            if (targetVersion) score += titleLower.includes(targetVersion) ? 0.4 : -0.3;
+            const descLower = (p.body_html || "").toLowerCase() + " " + (p.description || "").toLowerCase() + " " + p.title.toLowerCase();
+            const typeLower = (p.productType || "").toLowerCase();
+            const tagsLower = (p.tags || []).join(" ").toLowerCase();
 
-            // C. 🔥 SCORE TÉCNICO (EL SALVAVIDAS)
-            // Esto inyecta puntos masivos si la descripción coincide con la feature buscada
-            const fullDescription = (p.body_html || "") + " " + (p.description || "");
-            score += getTechnicalScore(queryLower, fullDescription);
+            // 🔥 REGLA 1: SI PIDE DESMONTABLE, ¡TIENE QUE SERLO!
+            if (wantsDetachable) {
+                const hasFeature = ["desmontable", "extraíble", "extraible", "amovible"].some(w => descLower.includes(w));
+                if (hasFeature) {
+                    score += 50.0; // Puntuación brutal para asegurar Top 1
+                } else {
+                    score = -10.0; // Castigo: Lo mandamos al fondo del abismo
+                }
+            }
+
+            // 🔥 REGLA 2: SI PIDE ABRIGO, ¡NO ME DES UNA GORRA!
+            if (wantsGarment) {
+                if (typeLower.includes("accesor") || titleLower.includes("gorra") || titleLower.includes("gorro")) {
+                    score -= 50.0; // Castigo brutal a accesorios
+                }
+            }
+
+            // Boost por palabras clave generales
+            if (queryLower.split(" ").some(kw => kw.length > 3 && titleLower.includes(kw))) score += 0.3;
 
             return { ...p, score };
-        }).sort((a, b) => b.score - a.score).slice(0, 8); // Nos quedamos con los 8 mejores
+        })
+        .filter(p => p.score > 0.5) // 🔥 FILTRADO FINAL: Solo pasan los que sobrevivieron al martillo
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 8);
 
         // Buscamos FAQs similares
         const faqResults = faqIndex
@@ -756,17 +777,12 @@ function formatStockForAI(variants) {
                     role: "system",
                     content: `Eres el asistente virtual oficial de Izas Outdoor. Tu tono es cercano, profesional y aventurero.
 
-                   🔥 REGLA 1: SELECTOR DE CATEGORÍA (CONDICIONAL):
-                    - Si el usuario pide una característica (ej: "capucha desmontable") Y NO MENCIONA NINGUNA PRENDA:
-                      -> Devuelve "choices": ["Chaquetas", "Pantalones", "Chalecos"].
-                    - ⛔ EXCEPCIÓN: Si el usuario dice "Abrigo", "Chaqueta", "Parka", "Anorak", "Cazadora" -> NO SAQUES SELECTOR. Busca productos.
-
-                    🔥 REGLA 2: EL PORTERO (FILTRADO TÉCNICO ESTRICTO):
-                    - Si el usuario pide "capucha desmontable" (o extraíble/amovible):
-                      1. LEE la 'Desc' de cada producto.
-                      2. Si la descripción NO contiene palabras como "desmontable", "extraíble" o "amovible" -> ❌ ELIMINA ESE PRODUCTO.
-                      3. Solo muestra productos que CUMPLAN el requisito.
-                    - Si tras filtrar no queda ninguno, di: "Lo siento, no tengo chaquetas con esa característica exacta."
+                   🔥 REGLA SUPREMA:
+                    - Te he pasado una lista de productos YA FILTRADOS por mi algoritmo.
+                    - Confía en ellos. Si te paso una chaqueta, es porque cumple los requisitos técnicos.
+                    
+                    - Si la lista "PRODUCTOS" está vacía, devuelve "choices": ["Chaquetas", "Pantalones"] para ayudar al usuario.
+                    - Si NO está vacía, muestra los productos.
                     
                     🌍 CONTROL DE IDIOMA (PRIORIDAD MÁXIMA):
                     1. DETECTA AUTOMÁTICAMENTE el idioma en el que escribe el usuario.
@@ -983,6 +999,7 @@ app.listen(PORT, async () => {
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 });
+
 
 
 
