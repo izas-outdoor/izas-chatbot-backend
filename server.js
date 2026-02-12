@@ -512,6 +512,9 @@ async function loadIndexes() {
 
 // 🧹 REFINAMIENTO: Traduce "quiero unos pantalones" a una query técnica
 async function refineQuery(userQuery, history) {
+   const cleanHistory = (history || [])
+        .filter(msg => msg.content && typeof msg.content === 'string' && msg.content.trim() !== '')
+        .map(msg => ({ role: msg.role, content: msg.content }));
     const response = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: [
@@ -943,3 +946,4 @@ app.listen(PORT, async () => {
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 });
+
