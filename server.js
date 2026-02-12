@@ -132,7 +132,7 @@ function cleanText(text) {
         .replace(/<[^>]*>?/gm, " ") // Quita etiquetas <div>, <p>...
         .replace(/\s+/g, " ")       // Quita espacios dobles
         .trim()
-        .substring(0, 1000);        
+        .substring(0, 600);         // Corta para no gastar muchos tokens
 }
 
 // Cálculo matemático para ver similitud entre vectores (Búsqueda Semántica)
@@ -156,7 +156,7 @@ function extractJSON(str) {
 }
 
 
-   /* ==========================================================================
+/* ==========================================================================
    🛍️ CONEXIÓN CON SHOPIFY (GRAPHQL) - CON SISTEMA ANTICAÍDAS
    ========================================================================== */
 
@@ -512,10 +512,6 @@ async function loadIndexes() {
 
 // 🧹 REFINAMIENTO: Traduce "quiero unos pantalones" a una query técnica
 async function refineQuery(userQuery, history) {
-   const safeHistory = (history || [])
-        .filter(msg => msg.content && typeof msg.content === 'string' && msg.content.trim() !== '')
-        .map(msg => ({ role: msg.role, content: msg.content }));
-   
     const response = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: [
@@ -525,10 +521,7 @@ async function refineQuery(userQuery, history) {
                 TU OBJETIVO: Generar la cadena de búsqueda perfecta para una base de datos vectorial.
 
                 REGLAS DE ORO:
-                1. Contexto: Mira el historial. 
-                   - Si el usuario dice "quiero esa", busca el nombre del producto anterior.
-                   - Si el historial reciente tiene una duda técnica (ej: "¿Tienen capucha desmontable?") y el usuario ahora dice una categoría (ej: "Chaquetas"), TU BÚSQUEDA DEBE SER: "Chaquetas con capucha desmontable".
-                   - ¡FUSIONA SIEMPRE CATEGORÍA ACTUAL + REQUISITO ANTERIOR!
+                1. Contexto: Mira el historial. Si el usuario dice "quiero esa", busca el nombre del producto anterior.
                 
                 2. 🕵️‍♂️ PRECISIÓN vs VARIEDAD:
                    - Si el usuario especifica "V2", "V3", "V4": INCLÚYELO (ej: "Naluns M V2 guia tallas").
@@ -588,51 +581,15 @@ function formatStockForAI(variants) {
     return stockInfo;
 }
 
-   /* ==========================================================================
-   🔍 MOTOR DE COINCIDENCIA TÉCNICA (NUEVO)
-   ========================================================================== */
-   function getTechnicalScore(query, productDesc) {
-       const descLower = productDesc.toLowerCase();
-       const queryLower = query.toLowerCase();
-       let techScore = 0;
-   
-       // Mapa de sinónimos técnicos
-       const techFeatures = [
-           { triggers: ["desmontable", "extraíble", "extraible", "amovible", "quitar capucha"], points: 10.0 },
-           { triggers: ["esconder", "oculta", "enrollable"], points: 5.0 },
-           { triggers: ["impermeable", "waterproof", "awps"], points: 3.0 },
-           { triggers: ["termosellad"], points: 3.0 },
-           { triggers: ["gore-tex"], points: 5.0 }
-       ];
-   
-       techFeatures.forEach(feature => {
-           // Si el usuario busca alguna de las triggers
-           const userWantsFeature = feature.triggers.some(t => queryLower.includes(t));
-           
-           if (userWantsFeature) {
-               // Y el producto tiene alguna de las triggers en su descripción
-               const productHasFeature = feature.triggers.some(t => descLower.includes(t));
-               if (productHasFeature) {
-                   techScore += feature.points;
-               }
-           }
-       });
-   
-       return techScore;
-   }
 
-   /* ==========================================================================
+/* ==========================================================================
    🚪 ENDPOINT PRINCIPAL (/api/ai/search)
    ========================================================================== */
-   app.post("/api/ai/search", async (req, res) => {
+app.post("/api/ai/search", async (req, res) => {
     const { q, history, visible_ids, session_id } = req.body;
     if (!q) return res.status(400).json({ error: "Falta query" });
 
     try {
-       // 🔥 SANITIZACIÓN GLOBAL DEL HISTORIAL (El escudo anti-400)
-        const cleanHistory = (history || [])
-            .filter(h => h.content && typeof h.content === 'string' && h.content.trim() !== '')
-            .map(h => ({ role: h.role, content: h.content }));
         // ---------------------------------------------------------
         // 1. 🔍 DETECCIÓN Y SEGURIDAD DE PEDIDOS
         // ---------------------------------------------------------
@@ -684,6 +641,7 @@ function formatStockForAI(variants) {
         // ---------------------------------------------------------
         const normalizedQuery = normalizeQuery(q); // Aplicamos normalización (Tallas XXL->2XL)
         const optimizedQuery = await refineQuery(normalizedQuery, history || []);
+        
         if (aiIndex.length === 0) await loadIndexes();
 
         // Filtramos productos que el usuario ya tiene en pantalla
@@ -696,50 +654,33 @@ function formatStockForAI(variants) {
         const embResponse = await openai.embeddings.create({ model: "text-embedding-3-large", input: optimizedQuery });
         const vector = embResponse.data[0].embedding;
 
-        // --- 🕵️‍♂️ LÓGICA DE FILTRADO TÉCNICO ("EL MARTILLO") ---
-        // Definimos triggers: si la query tiene X, el producto DEBE tener Y.
-        
-        const queryLower = optimizedQuery.toLowerCase();
-        
-        // 1. Detección de intención "DESMONTABLE"
-        const wantsDetachable = ["desmontable", "extraíble", "extraible", "amovible", "quitar"].some(w => queryLower.includes(w));
-        
-        // 2. Detección de intención "PRENDA" (Evitar Gorras si piden Abrigos)
-        const wantsGarment = ["chaqueta", "abrigo", "parka", "anorak", "cazadora"].some(w => queryLower.includes(w));
+        // Scoring y Lógica de Versiones
+        const versionMatch = optimizedQuery.match(/\b(v\d+|ii|iii)\b/i);
+        const targetVersion = versionMatch ? versionMatch[0].toLowerCase() : null;
 
-        const searchResults = aiIndex.map(p => {
-            let score = cosineSimilarity(vector, p.embedding);
+        const searchResults = aiIndex
+            .map(p => {
+                let score = cosineSimilarity(vector, p.embedding);
+                const titleLower = p.title.toLowerCase();
+                const queryLower = optimizedQuery.toLowerCase().trim();
 
-            const titleLower = (p.title || "").toLowerCase();
-            const descLower = (p.body_html || "").toLowerCase() + " " + (p.description || "").toLowerCase() + " " + titleLower;
-            const typeLower = (p.productType || "").toLowerCase();
-            const tagsLower = (p.tags || []).join(" ").toLowerCase();
+                // Boost por coincidencia de palabras clave
+                const coreKeywords = queryLower.split(" ").filter(w => w.length > 3);
+                const matchesCore = coreKeywords.some(kw => titleLower.includes(kw));
+                if (matchesCore) score += 0.3;
 
-            // 🔥 REGLA 1: SI PIDE DESMONTABLE, ¡TIENE QUE SERLO!
-            if (wantsDetachable) {
-                const hasFeature = ["desmontable", "extraíble", "extraible", "amovible"].some(w => descLower.includes(w));
-                if (hasFeature) {
-                    score += 50.0; // Puntuación brutal para asegurar Top 1
-                } else {
-                    score = -10.0; // Castigo: Lo mandamos al fondo del abismo
+                // Penalización/Boost por versión (V2, V3...)
+                if (targetVersion) {
+                    if (titleLower.includes(targetVersion)) {
+                        score += 0.4;
+                    } else {
+                        score -= 0.3;
+                    }
                 }
-            }
-
-            // 🔥 REGLA 2: SI PIDE ABRIGO, ¡NO ME DES UNA GORRA!
-            if (wantsGarment) {
-                if (typeLower.includes("accesor") || titleLower.includes("gorra") || titleLower.includes("gorro")) {
-                    score -= 50.0; // Castigo brutal a accesorios
-                }
-            }
-
-            // Boost por palabras clave generales
-            if (queryLower.split(" ").some(kw => kw.length > 3 && titleLower.includes(kw))) score += 0.3;
-
-            return { ...p, score };
-        })
-        .filter(p => p.score > 0.5) // 🔥 FILTRADO FINAL: Solo pasan los que sobrevivieron al martillo
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 8);
+                return { ...p, score };
+            })
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 8); // Top 8 candidatos
 
         // Buscamos FAQs similares
         const faqResults = faqIndex
@@ -747,9 +688,12 @@ function formatStockForAI(variants) {
             .sort((a, b) => b.score - a.score)
             .slice(0, 2);
 
+        // Unimos los resultados
         const combinedCandidates = new Map();
-        if (visible_ids) aiIndex.filter(p => visible_ids.map(String).includes(String(p.id))).forEach(p => combinedCandidates.set(String(p.id), p));
-        searchResults.forEach(p => { if (combinedCandidates.size < 10) combinedCandidates.set(String(p.id), p); });
+        contextProducts.forEach(p => combinedCandidates.set(String(p.id), p));
+        searchResults.forEach(p => {
+            if (combinedCandidates.size < 10) combinedCandidates.set(String(p.id), p);
+        });
         
         let finalCandidatesList = Array.from(combinedCandidates.values());
 
@@ -768,7 +712,6 @@ function formatStockForAI(variants) {
             return `PRODUCTO ${isVisible}:
             - ID: ${p.id}
             - Título: ${p.title}
-            - Desc: ${cleanDescription}
             - Precio: ${p.price} €
             - Colores: ${officialColors}
             - Stock: ${stockText}`;
@@ -786,13 +729,6 @@ function formatStockForAI(variants) {
                     role: "system",
                     content: `Eres el asistente virtual oficial de Izas Outdoor. Tu tono es cercano, profesional y aventurero.
 
-                   🔥 REGLA SUPREMA:
-                    - Te he pasado una lista de productos YA FILTRADOS por mi algoritmo.
-                    - Confía en ellos. Si te paso una chaqueta, es porque cumple los requisitos técnicos.
-                    
-                    - Si la lista "PRODUCTOS" está vacía, devuelve "choices": ["Chaquetas", "Pantalones"] para ayudar al usuario.
-                    - Si NO está vacía, muestra los productos.
-                    
                     🌍 CONTROL DE IDIOMA (PRIORIDAD MÁXIMA):
                     1. DETECTA AUTOMÁTICAMENTE el idioma en el que escribe el usuario.
                     2. RESPONDE SIEMPRE en ese mismo idioma.
@@ -833,7 +769,7 @@ function formatStockForAI(variants) {
                     FAQs: ${faqResults.map(f => `P:${f.question} R:${f.answer}`).join("\n")}
                     PRODUCTOS DISPONIBLES: ${productsContext}
 
-                    Responde JSON: { "reply": "...", "products": [...], "category": "ETIQUETA", "choices": [...] }
+                    Responde JSON: { "reply": "...", "products": [...], "category": "ETIQUETA" }
                     `
                 },
                 ...history.slice(-2).map(m => ({ role: m.role, content: m.content })),
@@ -944,8 +880,7 @@ function formatStockForAI(variants) {
         res.json({ 
             products: finalProducts, 
             text: aiContent.reply, 
-            isSizeContext: isSizeContext,
-           choices: aiContent.choices || []
+            isSizeContext: isSizeContext 
         });
 
     } catch (error) {
@@ -954,7 +889,7 @@ function formatStockForAI(variants) {
     }
 });
 
-   /* ==========================================================================
+/* ==========================================================================
    📝 ENDPOINT PARA GUARDAR LOGS MANUALES (Feedback, Botones, etc.)
    ========================================================================== */
 app.post("/api/chat/log", async (req, res) => {
@@ -1008,18 +943,3 @@ app.listen(PORT, async () => {
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
