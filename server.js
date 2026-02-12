@@ -732,18 +732,17 @@ app.post("/api/ai/search", async (req, res) => {
                     role: "system",
                     content: `Eres el asistente virtual oficial de Izas Outdoor. Tu tono es cercano, profesional y aventurero.
 
-                   🔥 REGLA 1: SELECTOR DE CATEGORÍA (CONDICIONAL):
-                    - Si el usuario pide una característica técnica (ej: "capucha desmontable") Y NO MENCIONA NINGUNA PRENDA:
+                   🔥 REGLA 1: SELECTOR DE CATEGORÍA (ESTRICTO):
+                    - Si el usuario pide una característica (ej: "capucha desmontable") Y NO MENCIONA NINGUNA PRENDA:
                       -> Devuelve "choices": ["Chaquetas", "Pantalones", "Chalecos"].
-                    - ⛔ EXCEPCIÓN IMPORTANTE: Si el usuario dice "Abrigo", "Chaqueta", "Parka", "Anorak", "Cazadora" -> ESO YA ES LA PRENDA. ¡NO saques el selector! Busca directamente.
+                    - ⛔ EXCEPCIÓN: Si el usuario dice "Abrigo", "Chaqueta", "Parka", "Anorak", "Cazadora" -> NO SAQUES SELECTOR. Busca productos.
 
-                    🔥 REGLA 2: EL PORTERO (FILTRADO TÉCNICO ESTRICTO):
-                    - Tu trabajo es FILTRAR.
-                    - Si el usuario pide "capucha desmontable":
-                      1. LEE la 'Desc' de cada producto en la lista.
-                      2. Si la descripción dice "capucha fija" o no menciona que sea desmontable/extraíble -> ❌ ELIMINA ESE PRODUCTO DEL JSON.
-                      3. Solo muestra productos que CUMPLAN 100% el requisito.
-                    - Si tras filtrar no queda ninguno, di: "Lo siento, no tengo chaquetas con esa característica exacta. ¿Te sirven con capucha fija?" (y NO muestres productos).
+                    🔥 REGLA 2: EL PORTERO (FILTRADO TÉCNICO):
+                    - Si el usuario pide "capucha desmontable/extraíble":
+                      1. LEE la 'Desc' de cada producto.
+                      2. Si NO encuentras la palabra "desmontable", "extraíble" o similar en la descripción -> ❌ ELIMINA ESE PRODUCTO.
+                      3. ¡Es mejor decir que no hay a mostrar uno con capucha fija!
+                    - Si tras filtrar no queda ninguno, di: "Lo siento, no tengo chaquetas con esa característica exacta en stock."
                     
                     🌍 CONTROL DE IDIOMA (PRIORIDAD MÁXIMA):
                     1. DETECTA AUTOMÁTICAMENTE el idioma en el que escribe el usuario.
@@ -960,6 +959,7 @@ app.listen(PORT, async () => {
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 });
+
 
 
 
