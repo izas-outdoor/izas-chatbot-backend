@@ -760,6 +760,8 @@ app.post("/api/ai/search", async (req, res) => {
                     - Si ves un producto marcado con "(🔥 USUARIO VIENDO AHORA)", significa que el cliente está en esa página web.
                     - Si pregunta "qué precio tiene", "hay talla", "cómo talla" o "tabla de medidas" SIN DECIR EL NOMBRE, SE REFIERE A ESE PRODUCTO.
                     - Priorízalo en tu respuesta.
+                    - ⚠️ OBLIGATORIO: Si el cliente está viendo un producto, DEBES INCLUIRLO SIEMPRE en el array "products" de tu respuesta JSON, incluso si solo estás dando información de tallas o envíos.
+                    - El panel lateral depende de que tú envíes ese producto en el JSON. No falles.
 
                     ⛔ REGLAS DE SEGURIDAD (IMPORTANTE):
                     1. COMPETENCIA Y CANALES: Decathlon, Amazon... son partners. No mientas. Recomienda comprar en web oficial.
@@ -969,4 +971,5 @@ app.listen(PORT, async () => {
     console.log(`🚀 Server en http://localhost:${PORT}`);
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
+
 });
