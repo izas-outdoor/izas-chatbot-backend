@@ -512,9 +512,6 @@ async function loadIndexes() {
 
 // 🧹 REFINAMIENTO: Traduce "quiero unos pantalones" a una query técnica
 async function refineQuery(userQuery, history) {
-   const cleanHistory = (history || [])
-        .filter(msg => msg.content && typeof msg.content === 'string' && msg.content.trim() !== '')
-        .map(msg => ({ role: msg.role, content: msg.content }));
     const response = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: [
@@ -588,8 +585,12 @@ function formatStockForAI(variants) {
 /* ==========================================================================
    🚪 ENDPOINT PRINCIPAL (/api/ai/search)
    ========================================================================== */
+/* ==========================================================================
+   🚪 ENDPOINT PRINCIPAL (/api/ai/search)
+   ========================================================================== */
 app.post("/api/ai/search", async (req, res) => {
-    const { q, history, visible_ids, session_id } = req.body;
+    // 🔥🔥 AÑADIDO: 'context_handle' para saber dónde está el usuario
+    const { q, history, visible_ids, session_id, context_handle } = req.body;
     if (!q) return res.status(400).json({ error: "Falta query" });
 
     try {
@@ -647,7 +648,13 @@ app.post("/api/ai/search", async (req, res) => {
         
         if (aiIndex.length === 0) await loadIndexes();
 
-        // Filtramos productos que el usuario ya tiene en pantalla
+        // 🔥🔥🔥 CONTEXTO WEB: Detectamos si hay un producto en pantalla 🔥🔥🔥
+        let productOnScreen = null;
+        if (context_handle) {
+            productOnScreen = aiIndex.find(p => p.handle === context_handle);
+        }
+
+        // Filtramos productos que el usuario ya tiene en pantalla (chat anterior)
         let contextProducts = [];
         if (visible_ids && visible_ids.length > 0) {
             contextProducts = aiIndex.filter(p => visible_ids.map(String).includes(String(p.id)));
@@ -693,7 +700,16 @@ app.post("/api/ai/search", async (req, res) => {
 
         // Unimos los resultados
         const combinedCandidates = new Map();
+
+        // 1. PRIORIDAD TOTAL: Producto que el usuario está viendo
+        if (productOnScreen) {
+            combinedCandidates.set(String(productOnScreen.id), productOnScreen);
+        }
+
+        // 2. Productos contexto chat
         contextProducts.forEach(p => combinedCandidates.set(String(p.id), p));
+        
+        // 3. Resultados de búsqueda
         searchResults.forEach(p => {
             if (combinedCandidates.size < 10) combinedCandidates.set(String(p.id), p);
         });
@@ -710,9 +726,12 @@ app.post("/api/ai/search", async (req, res) => {
             const cleanDescription = cleanText(p.body_html || p.description);
             const stockText = formatStockForAI(p.variants); // Generado con datos frescos
 
-            const isVisible = visible_ids && visible_ids.map(String).includes(String(p.id)) ? "(EN PANTALLA)" : "";
+            // ETIQUETA VISUAL PARA LA IA
+            let tag = "";
+            if (productOnScreen && String(p.id) === String(productOnScreen.id)) tag = " (🔥 USUARIO VIENDO AHORA)";
+            else if (visible_ids && visible_ids.map(String).includes(String(p.id))) tag = " (EN PANTALLA)";
 
-            return `PRODUCTO ${isVisible}:
+            return `PRODUCTO${tag}:
             - ID: ${p.id}
             - Título: ${p.title}
             - Precio: ${p.price} €
@@ -737,33 +756,38 @@ app.post("/api/ai/search", async (req, res) => {
                     2. RESPONDE SIEMPRE en ese mismo idioma.
                     3. Si la información de los productos (título, descripción, stock) que te doy abajo está en español, TRADÚCELA al idioma del usuario en tu respuesta final.
 
+                    🔥 CONTEXTO WEB (IMPORTANTE):
+                    - Si ves un producto marcado con "(🔥 USUARIO VIENDO AHORA)", significa que el cliente está en esa página web.
+                    - Si pregunta "qué precio tiene", "hay talla", "cómo talla" o "tabla de medidas" SIN DECIR EL NOMBRE, SE REFIERE A ESE PRODUCTO.
+                    - Priorízalo en tu respuesta.
+
                     ⛔ REGLAS DE SEGURIDAD (IMPORTANTE):
                     1. COMPETENCIA Y CANALES: Decathlon, Amazon... son partners. No mientas. Recomienda comprar en web oficial.
                     2. CONOCIMIENTO: Usa "PRODUCTOS DISPONIBLES". Si no sabes, dilo.
 
                     3. GESTIÓN DE STOCK Y CONTEXTO VISUAL (¡MUY IMPORTANTE!):
-                       - CRUCIAL: LEE EL CAMPO 'Stock:' DE CADA PRODUCTO.
-                       - Si dice "Tallas disponibles (S, M, L)", ENTONCES SÍ HAY STOCK. No inventes que está agotado.
-                       - Si un color tiene tallas y otro no, ESPECIFÍCALO CLARAMENTE.
-                       - Ejemplo correcto: "El modelo Konka en Azul tiene S y M. En Rojo está agotado."
+                        - CRUCIAL: LEE EL CAMPO 'Stock:' DE CADA PRODUCTO.
+                        - Si dice "Tallas disponibles (S, M, L)", ENTONCES SÍ HAY STOCK. No inventes que está agotado.
+                        - Si un color tiene tallas y otro no, ESPECIFÍCALO CLARAMENTE.
+                        - Ejemplo correcto: "El modelo Konka en Azul tiene S y M. En Rojo está agotado."
                     
                     4. 👨‍👩‍👧‍👦 GESTIÓN DE FAMILIAS (EL "MODO CARRUSEL"):
-                       - ACTIVACIÓN: Si el usuario busca un nombre genérico (ej: "Anger", "Naluns") y ves varios resultados distintos.
-                       - ACCIÓN:
-                         1. JSON "reply": "He encontrado varias opciones para [Nombre]. Por favor, selecciona abajo el modelo exacto."
-                         2. ⚠️ JSON "products": [ID1, ID2, ID3...] <-- ¡OBLIGATORIO LLENARLO CON TODO LO ENCONTRADO!
-                       - PROHIBIDO: No des enlaces de tallas ni precios específicos en el texto si estás en este modo. Obliga al usuario a clicar en la tarjeta.
+                        - ACTIVACIÓN: Si el usuario busca un nombre genérico (ej: "Anger", "Naluns") y ves varios resultados distintos.
+                        - ACCIÓN:
+                          1. JSON "reply": "He encontrado varias opciones para [Nombre]. Por favor, selecciona abajo el modelo exacto."
+                          2. ⚠️ JSON "products": [ID1, ID2, ID3...] <-- ¡OBLIGATORIO LLENARLO CON TODO LO ENCONTRADO!
+                        - PROHIBIDO: No des enlaces de tallas ni precios específicos en el texto si estás en este modo. Obliga al usuario a clicar en la tarjeta.
 
                     5. 🚨 DERIVACIÓN A HUMANO (PRIORIDAD MÁXIMA):
-                       - Si piden "agente", "humano", "persona": NO INTENTES AYUDAR.
-                       - RESPUESTA OBLIGATORIA: "¡Claro! Escríbenos a info@izas-outdoor.com o llama al 976502040 dentro del horario laboral."
-                       - ETIQUETA: "DERIVACION_HUMANA"
+                        - Si piden "agente", "humano", "persona": NO INTENTES AYUDAR.
+                        - RESPUESTA OBLIGATORIA: "¡Claro! Escríbenos a info@izas-outdoor.com o llama al 976502040 dentro del horario laboral."
+                        - ETIQUETA: "DERIVACION_HUMANA"
 
                     6. 🕵️‍♂️ BÚSQUEDA CRUZADA DE TALLAS (¡CRÍTICO!):
-                       - Si el usuario pregunta "¿Hay talla XXL de la Konka?":
-                       - 🛑 NO mires solo el primer producto y digas "No".
-                       - ✅ REVISA TODOS los productos listados abajo.
-                       - Si el producto 1 no tiene, pero el producto 2 sí, responde: "Sí, la tengo disponible en talla XXL en color [Color del Producto 2]".
+                        - Si el usuario pregunta "¿Hay talla XXL de la Konka?":
+                        - 🛑 NO mires solo el primer producto y digas "No".
+                        - ✅ REVISA TODOS los productos listados abajo.
+                        - Si el producto 1 no tiene, pero el producto 2 sí, responde: "Sí, la tengo disponible en talla XXL en color [Color del Producto 2]".
 
                     --- DATOS ---
                     ALERTA SEGURIDAD: ${securityWarning || "Ninguna"}
@@ -776,8 +800,8 @@ app.post("/api/ai/search", async (req, res) => {
                     `
                 },
                 ...history.slice(-2).map(m => ({ role: m.role, content: m.content })),
-                // 🔥 FIX: Enviamos la query NORMALIZADA (donde XXL es 2XL) a la IA para evitar confusiones
-                { role: "user", content: `Usuario busca: "${q}" (Interpretado como: "${normalizedQuery}")` }
+                // 🔥 AVISAMOS AL PROMPT DEL CONTEXTO
+                { role: "user", content: `Usuario busca: "${q}" (Interpretado como: "${normalizedQuery}") ${productOnScreen ? "[Contexto: Usuario viendo " + productOnScreen.title + "]" : ""}` }
             ]
         });
 
@@ -946,4 +970,3 @@ app.listen(PORT, async () => {
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 });
-
