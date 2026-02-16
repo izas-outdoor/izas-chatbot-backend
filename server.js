@@ -226,7 +226,7 @@ async function getAllProducts() {
                 }
               }
             }
-            metafields(first: 25) { edges { node { namespace key value } } }
+            metafields(first: 40) { edges { node { namespace key value } } }
           }
         }
       }
@@ -973,4 +973,5 @@ app.listen(PORT, async () => {
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 
 });
+
 
