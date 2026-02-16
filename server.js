@@ -721,19 +721,34 @@ app.post("/api/ai/search", async (req, res) => {
 
         // Generamos el texto que leerá la IA
         const productsContext = finalCandidatesList.map(p => {
+            const isViewing = productOnScreen && String(p.id) === String(productOnScreen.id) ? " (🔥 VIENDO AHORA)" : "";
             const colorOption = p.options ? p.options.find(o => o.name.match(/color|cor/i)) : null;
             const officialColors = colorOption ? colorOption.values.join(", ") : "Único";
             const cleanDescription = cleanText(p.body_html || p.description);
             const stockText = formatStockForAI(p.variants); // Generado con datos frescos
+            let metaInfo = "";
+             if (p.metafields) {
+                 metaInfo = Object.entries(p.metafields)
+                     .map(([key, val]) => {
+                         // Si el valor es una lista o JSON, lo convertimos a texto
+                         const valStr = typeof val === 'object' ? JSON.stringify(val) : String(val);
+                         // Limpiamos HTML si lo hubiera
+                         return `${key}: ${cleanText(valStr)}`;
+                     })
+                     .join(" | ");
+             }
 
             // ETIQUETA VISUAL PARA LA IA
             let tag = "";
             if (productOnScreen && String(p.id) === String(productOnScreen.id)) tag = " (🔥 USUARIO VIENDO AHORA)";
             else if (visible_ids && visible_ids.map(String).includes(String(p.id))) tag = " (EN PANTALLA)";
 
-            return `PRODUCTO${tag}:
+            return `PRODUCTO${isViewing}:
             - ID: ${p.id}
             - Título: ${p.title}
+            - Tags:${p.tags.join(",")}
+            - Desc:${cleanText(p.body_html)}
+            - InfoExtra:${metaInfo}
             - Precio: ${p.price} €
             - Colores: ${officialColors}
             - Stock: ${stockText}`;
@@ -973,5 +988,6 @@ app.listen(PORT, async () => {
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 
 });
+
 
 
