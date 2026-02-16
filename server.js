@@ -785,6 +785,11 @@ app.post("/api/ai/search", async (req, res) => {
                     1. COMPETENCIA Y CANALES: Decathlon, Amazon... son partners. No mientas. Recomienda comprar en web oficial.
                     2. CONOCIMIENTO: Usa "PRODUCTOS DISPONIBLES". Si no sabes, dilo.
 
+                    📍 REGLA ESPECIAL TIENDAS FÍSICAS:
+                    - Si el usuario pregunta "¿dónde hay tiendas?", "tiendas físicas" o "ubicación":
+                    - Responde que tenéis tiendas propias y distribuidores.
+                    - ⚠️ OBLIGATORIO: Incluye siempre este enlace para que lo busquen: https://www.izas-outdoor.com/pages/localizador-de-tiendas
+
                     3. GESTIÓN DE STOCK Y CONTEXTO VISUAL (¡MUY IMPORTANTE!):
                         - CRUCIAL: LEE EL CAMPO 'Stock:' DE CADA PRODUCTO.
                         - Si dice "Tallas disponibles (S, M, L)", ENTONCES SÍ HAY STOCK. No inventes que está agotado.
@@ -991,6 +996,7 @@ app.listen(PORT, async () => {
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 
 });
+
 
 
 
