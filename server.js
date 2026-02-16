@@ -787,7 +787,7 @@ app.post("/api/ai/search", async (req, res) => {
 
                     📍 REGLA ESPECIAL TIENDAS FÍSICAS:
                     - Si el usuario pregunta "¿dónde hay tiendas?", "tiendas físicas" o "ubicación":
-                    - Responde que tenéis tiendas propias y distribuidores.
+                    - Responde que tenéis tiendas propias de Izass.
                     - ⚠️ OBLIGATORIO: Incluye siempre este enlace para que lo busquen: https://www.izas-outdoor.com/pages/localizador-de-tiendas
 
                     3. GESTIÓN DE STOCK Y CONTEXTO VISUAL (¡MUY IMPORTANTE!):
@@ -996,6 +996,7 @@ app.listen(PORT, async () => {
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 
 });
+
 
 
 
