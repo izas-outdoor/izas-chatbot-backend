@@ -127,12 +127,15 @@ function normalizeQuery(query) {
 
 // Limpia texto HTML sucio que viene de Shopify
 function cleanText(text) {
-    if (!text) return "Sin información";
-    return text
-        .replace(/<[^>]*>?/gm, " ") // Quita etiquetas <div>, <p>...
-        .replace(/\s+/g, " ")       // Quita espacios dobles
-        .trim()
-        .substring(0, 600);         // Corta para no gastar muchos tokens
+    if (!text) return "";
+    // 1. Reemplazamos <br> por saltos de línea reales para que la IA entienda la estructura
+    let clean = text.replace(/<br\s*\/?>/gi, "\n"); 
+    // 2. Quitamos el resto de etiquetas HTML
+    clean = clean.replace(/<[^>]*>?/gm, " ");
+    // 3. Quitamos espacios dobles
+    clean = clean.replace(/\s+/g, " ").trim();
+    // 🔥 SUBIMOS EL LÍMITE A 5000 (O lo quitamos directamente)
+    return clean.substring(0, 5000); 
 }
 
 // Cálculo matemático para ver similitud entre vectores (Búsqueda Semántica)
@@ -988,6 +991,7 @@ app.listen(PORT, async () => {
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 
 });
+
 
 
 
