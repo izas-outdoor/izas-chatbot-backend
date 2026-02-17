@@ -781,6 +781,15 @@ app.post("/api/ai/search", async (req, res) => {
                     - ⚠️ OBLIGATORIO: Si el cliente está viendo un producto, DEBES INCLUIRLO SIEMPRE en el array "products" de tu respuesta JSON, incluso si solo estás dando información de tallas o envíos.
                     - El panel lateral depende de que tú envíes ese producto en el JSON. No falles.
 
+                    🏷️ CATEGORÍAS DISPONIBLES (Para el campo 'category'):
+                    - TALLAJE: Tallas, medidas, guías.
+                    - PEDIDS: Envíos, plazos, costes.
+                    - DEVOLUCION/CAMBIO: Devoluciones, cambios.
+                    - PRODUCTO: Info de producto, stock, características.
+                    - TIENDA: Tiendas físicas.
+                    - HUMANO: Piden hablar con humano.
+                    - GENERAL: Saludo, otros.
+
                     ⛔ REGLAS DE SEGURIDAD (IMPORTANTE):
                     1. COMPETENCIA Y CANALES: Decathlon, Amazon... son partners. No mientas. Recomienda comprar en web oficial.
                     2. CONOCIMIENTO: Usa "PRODUCTOS DISPONIBLES". Si no sabes, dilo.
@@ -996,6 +1005,7 @@ app.listen(PORT, async () => {
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 
 });
+
 
 
 
