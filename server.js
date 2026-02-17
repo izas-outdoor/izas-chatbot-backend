@@ -783,7 +783,7 @@ app.post("/api/ai/search", async (req, res) => {
 
                     🏷️ CATEGORÍAS DISPONIBLES (Para el campo 'category'):
                     - TALLAJE: Tallas, medidas, guías.
-                    - PEDIDS: Envíos, plazos, costes.
+                    - PEDIDOS: Envíos, plazos, costes.
                     - DEVOLUCION/CAMBIO: Devoluciones, cambios.
                     - PRODUCTO: Info de producto, stock, características.
                     - TIENDA: Tiendas físicas.
@@ -1005,6 +1005,7 @@ app.listen(PORT, async () => {
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 
 });
+
 
 
 
