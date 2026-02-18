@@ -677,12 +677,18 @@ app.post("/api/ai/search", async (req, res) => {
                 const titleLower = p.title.toLowerCase();
                 const queryLower = optimizedQuery.toLowerCase().trim();
 
-                // Boost por coincidencia de palabras clave
-                const coreKeywords = queryLower.split(" ").filter(w => w.length > 3);
-                const matchesCore = coreKeywords.some(kw => titleLower.includes(kw));
-                if (matchesCore) score += 0.3;
+                // 🔥 CAMBIO 1: BOOST ACUMULATIVO
+                // En lugar de ".some()" (alguna), usamos un bucle.
+                // Si la búsqueda tiene 2 palabras clave, sumamos puntos por CADA una.
+                const coreKeywords = queryLower.split(/\s+/).filter(w => w.length > 3);
+                
+                coreKeywords.forEach(kw => {
+                    if (titleLower.includes(kw)) {
+                        score += 0.5; // Damos 0.5 puntos por CADA coincidencia de palabra
+                    }
+                });
 
-                // Penalización/Boost por versión (V2, V3...)
+                // Penalización/Boost por versión (Esto lo dejamos igual, está bien)
                 if (targetVersion) {
                     if (titleLower.includes(targetVersion)) {
                         score += 0.4;
@@ -693,7 +699,7 @@ app.post("/api/ai/search", async (req, res) => {
                 return { ...p, score };
             })
             .sort((a, b) => b.score - a.score)
-            .slice(0, 8); // Top 8 candidatos
+            .slice(0, 20); // 🔥 CAMBIO 2: Subimos de 8 a 20 para que quepan variantes de ambos modelos
 
         // Buscamos FAQs similares
         const faqResults = faqIndex
@@ -1005,6 +1011,7 @@ app.listen(PORT, async () => {
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 
 });
+
 
 
 
