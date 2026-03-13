@@ -47,7 +47,7 @@
   {
     "id": "coste_envio",
     "question": "¿Cuánto cuestan los gastos de envío?",
-    "answer": "El envío es GRATIS para pedidos superiores a 39,99€. Para pedidos inferiores, el coste es de 4,99€."
+    "answer": "El envío es GRATIS para pedidos superiores a 49,99€. Para pedidos inferiores, el coste es de 4,99€."
   },
   {
     "id": "devolucion_externa",
@@ -90,6 +90,7 @@
     "answer": "Si no estabas, el transportista puede dejarlo en un punto cercano para agilizar. Si necesitas entrega en domicilio obligatoria, escríbenos a info@izas-outdoor.com para intentar reprogramarlo."
   }
 ]
+
 
 
 
