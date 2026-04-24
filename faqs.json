@@ -88,6 +88,11 @@
     "id": "ausente_casa",
     "question": "No estaba en casa y han dejado el paquete en un punto de recogida",
     "answer": "Si no estabas, el transportista puede dejarlo en un punto cercano para agilizar. Si necesitas entrega en domicilio obligatoria, escríbenos a info@izas-outdoor.com para intentar reprogramarlo."
+  },
+    {
+    "id": "newsletter",
+    "question": "¿Cómo me suscribo a la newsletter?",
+    "answer": "Para suscribirte a la newsletter puedes hacerlo fácilmente a través de este enlace: https://www.izas-outdoor.com/pages/newsletter"
   }
 ]
 
