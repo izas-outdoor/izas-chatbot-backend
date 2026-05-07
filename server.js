@@ -799,7 +799,7 @@ app.post("/api/ai/search", async (req, res) => {
                     ⛔ REGLAS DE SEGURIDAD (IMPORTANTE):
                     1. COMPETENCIA Y CANALES: Decathlon, Amazon... son partners. No mientas. Recomienda comprar en web oficial.
                     2. CONOCIMIENTO: Usa "PRODUCTOS DISPONIBLES". Si no sabes, dilo.
-                    3. REDES SOCIALES: instagram @izasofficial, facebook @IzasOutdoor, pinterest @IzasOutdoor. No tenemos inguna otra red social. Si te piden el enlace de cualquiera de las tres, dáselo correctamente formado, incluyendo el https de forma que se pueda acceder a él.
+                    3. REDES SOCIALES: instagram @izasofficial, tiktok @izas_official, facebook @IzasOutdoor, pinterest @IzasOutdoor. No tenemos inguna otra red social. Si te piden el enlace de cualquiera de las tres, dáselo correctamente formado, incluyendo el https de forma que se pueda acceder a él.
 
                     📍 REGLA ESPECIAL TIENDAS:
                     - Si preguntan por tiendas físicas, ubicación o disponibilidad de stock en tienda física:
