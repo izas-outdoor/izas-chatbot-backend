@@ -582,20 +582,85 @@ function buildAIText(product) {
     return `TIPO: ${product.productType}\nTITULO: ${product.title}\nDESC: ${product.description}\nTAGS: ${product.tags.join(", ")}`;
 }
 
+// Tabla de Supabase donde persistimos el índice de embeddings.
+// (Requiere crear la tabla con el SQL incluido en SUPABASE_SETUP.sql)
+const AI_INDEX_TABLE = "ai_index";
+
+// 📥 Intenta cargar el índice de productos (con embeddings) desde Supabase.
+// Devuelve un array; vacío si no hay nada o falla.
+async function loadIndexFromSupabase() {
+    try {
+        // Paginamos por si hay muchos productos (Supabase limita ~1000 por query).
+        let all = [];
+        let from = 0;
+        const page = 1000;
+        while (true) {
+            const { data, error } = await supabase
+                .from(AI_INDEX_TABLE)
+                .select("payload")
+                .range(from, from + page - 1);
+            if (error) { console.error("⚠️ Error leyendo índice de Supabase:", error.message); break; }
+            if (!data || data.length === 0) break;
+            all = all.concat(data.map(r => r.payload));
+            if (data.length < page) break;
+            from += page;
+        }
+        return all;
+    } catch (e) {
+        console.error("⚠️ Excepción leyendo índice de Supabase:", e.message);
+        return [];
+    }
+}
+
+// 💾 Guarda el índice de productos en Supabase (una fila por producto).
+async function saveIndexToSupabase(index) {
+    if (!index || index.length === 0) return;
+    try {
+        const rows = index.map(p => ({ id: String(p.id), payload: p, updated_at: new Date() }));
+        // Subimos en lotes para no exceder límites de tamaño de petición.
+        const batchSize = 100;
+        for (let i = 0; i < rows.length; i += batchSize) {
+            const batch = rows.slice(i, i + batchSize);
+            const { error } = await supabase.from(AI_INDEX_TABLE).upsert(batch, { onConflict: "id" });
+            if (error) { console.error("⚠️ Error guardando índice en Supabase:", error.message); return; }
+        }
+        console.log(`💾 Índice persistido en Supabase (${rows.length} productos).`);
+    } catch (e) {
+        console.error("⚠️ Excepción guardando índice en Supabase:", e.message);
+    }
+}
+
 // Carga los productos al iniciar el servidor (Caché -> O descarga nueva)
-async function loadIndexes() {
-    // 1. Intentamos cargar de caché primero para arrancar rápido
-    if (fs.existsSync(INDEX_FILE)) {
+// force=true ignora las cachés (local y Supabase) y reconstruye desde Shopify.
+async function loadIndexes(force = false) {
+    if (force) { aiIndex = []; console.log("♻️ Reindexación forzada: ignorando cachés."); }
+
+    // 1. Intentamos cargar de caché local primero para arrancar rápido
+    if (!force && fs.existsSync(INDEX_FILE)) {
         console.log("📦 Cargando productos desde caché (arranque rápido)...");
         try {
             aiIndex = JSON.parse(fs.readFileSync(INDEX_FILE, "utf8"));
-        } catch (e) { 
+        } catch (e) {
             console.error("⚠️ Caché corrupta, se ignorará.");
-            aiIndex = []; 
+            aiIndex = [];
         }
     }
 
-    // 2. Si no hay datos (o queremos refrescar), descargamos de Shopify
+    // 1.5 Si la caché local está vacía (típico en Render tras un reinicio),
+    //     intentamos cargar el índice ya vectorizado desde Supabase. Así NO
+    //     volvemos a llamar a OpenAI para re-embeddear todo el catálogo.
+    if (!force && aiIndex.length === 0) {
+        console.log("☁️ Caché local vacía: intentando cargar índice desde Supabase...");
+        const fromDb = await loadIndexFromSupabase();
+        if (fromDb.length > 0) {
+            aiIndex = fromDb;
+            console.log(`✅ Índice cargado desde Supabase: ${aiIndex.length} productos (sin re-vectorizar).`);
+            // Reescribimos la caché local para acelerar el siguiente arranque.
+            try { fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex)); } catch (e) { /* fs efímero */ }
+        }
+    }
+
+    // 2. Si SIGUE sin haber datos, descargamos de Shopify y vectorizamos.
     if (aiIndex.length === 0) {
         console.log("🤖 Indexando productos en Shopify (esto puede tardar)...");
         try {
@@ -610,11 +675,14 @@ async function loadIndexes() {
                     tempIndex.push({ ...p, embedding: emb.data[0].embedding });
                 }
                 aiIndex = tempIndex; // Actualizamos la memoria
-                
-                try { 
-                    fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex)); 
+
+                try {
+                    fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex));
                     console.log("💾 Índice guardado en disco.");
                 } catch (e) { console.error("⚠️ No se pudo guardar caché en disco (read-only system?)"); }
+
+                // 🔥 Persistimos también en Supabase para no re-vectorizar en cada arranque.
+                await saveIndexToSupabase(aiIndex);
             } else {
                 console.warn("⚠️ Advertencia: Shopify devolvió 0 productos.");
             }
@@ -1203,6 +1271,23 @@ app.get("/health", (req, res) => {
         faqsIndexed: faqIndex.length,
         uptimeSeconds: Math.round(process.uptime())
     });
+});
+
+/* ==========================================================================
+   ♻️ REINDEXAR CATÁLOGO (/api/admin/reindex)
+   ==========================================================================
+   Reconstruye el índice desde Shopify (re-vectoriza) y lo persiste en Supabase.
+   Úsalo cuando cambies productos. Protegido con ADMIN_TOKEN. */
+app.post("/api/admin/reindex", async (req, res) => {
+    const token = req.headers["x-admin-token"];
+    if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN) {
+        return res.status(401).json({ error: "No autorizado" });
+    }
+    // Lanzamos en segundo plano para no dejar la petición colgada mucho tiempo.
+    res.json({ status: "reindexando", message: "La reindexación se está ejecutando en segundo plano." });
+    loadIndexes(true)
+        .then(() => console.log("✅ Reindexación manual completada."))
+        .catch(err => console.error("❌ Error en reindexación manual:", err));
 });
 
 /* ==========================================================================
