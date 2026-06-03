@@ -25,6 +25,7 @@ import "dotenv/config";
 import fetch from "node-fetch";
 import OpenAI from "openai";
 import fs from "fs";
+import crypto from "crypto";
 import cors from "cors";
 import { COLOR_CONCEPTS, CONCEPTS } from "./concepts.js"; // Diccionarios de sinónimos
 import { createClient } from "@supabase/supabase-js";
@@ -627,6 +628,91 @@ async function saveIndexToSupabase(index) {
         console.log(`💾 Índice persistido en Supabase (${rows.length} productos).`);
     } catch (e) {
         console.error("⚠️ Excepción guardando índice en Supabase:", e.message);
+    }
+}
+
+// Hash del texto que vectorizamos: si no cambia, reutilizamos el embedding.
+function contentHash(product) {
+    return crypto.createHash("md5").update(buildAIText(product)).digest("hex");
+}
+
+// Borra de Supabase los productos que ya no existen en Shopify.
+async function deleteFromSupabase(ids) {
+    if (!ids || ids.length === 0) return;
+    try {
+        const { error } = await supabase.from(AI_INDEX_TABLE).delete().in("id", ids.map(String));
+        if (error) console.error("⚠️ Error borrando productos de Supabase:", error.message);
+    } catch (e) {
+        console.error("⚠️ Excepción borrando de Supabase:", e.message);
+    }
+}
+
+// 🔄 SINCRONIZACIÓN INCREMENTAL DEL CATÁLOGO
+// Descarga la lista de Shopify y SOLO vectoriza lo nuevo o lo que ha cambiado.
+// Reutiliza los embeddings existentes para lo que no ha cambiado (barato).
+// Maneja también productos borrados. Pensado para ejecutarse periódicamente.
+let isSyncing = false;
+async function syncCatalog() {
+    if (isSyncing) { debugLog("↩️ Sync ya en curso, se omite."); return; }
+    isSyncing = true;
+    try {
+        const products = await getAllProducts();
+        if (!products || products.length === 0) {
+            console.warn("⚠️ Sync: Shopify devolvió 0 productos, no toco el índice.");
+            return;
+        }
+
+        // Índice actual por id para reutilizar embeddings.
+        const currentById = new Map(aiIndex.map(p => [String(p.id), p]));
+
+        const newIndex = [];
+        const toUpsert = [];
+        let embedded = 0;
+
+        for (const p of products) {
+            const id = String(p.id);
+            const existing = currentById.get(id);
+            const hash = contentHash(p);
+
+            if (existing && existing.embedding && existing._hash === hash) {
+                // Sin cambios: reutilizamos el embedding existente.
+                newIndex.push({ ...p, embedding: existing.embedding, _hash: hash });
+            } else if (existing && existing.embedding && !existing._hash && contentHash(existing) === hash) {
+                // Entrada antigua sin _hash pero con el mismo contenido: reutilizamos.
+                newIndex.push({ ...p, embedding: existing.embedding, _hash: hash });
+            } else {
+                // Nuevo o cambiado: re-vectorizamos.
+                const emb = await openai.embeddings.create({ model: "text-embedding-3-large", input: buildAIText(p) });
+                const entry = { ...p, embedding: emb.data[0].embedding, _hash: hash };
+                newIndex.push(entry);
+                toUpsert.push(entry);
+                embedded++;
+            }
+        }
+
+        // Detectamos borrados: ids que estaban antes y ya no vienen de Shopify.
+        const freshIds = new Set(products.map(p => String(p.id)));
+        const removedIds = [...currentById.keys()].filter(id => !freshIds.has(id));
+
+        // Aplicamos cambios en memoria
+        aiIndex = newIndex;
+
+        // Persistimos solo lo necesario
+        if (toUpsert.length > 0) await saveIndexToSupabase(toUpsert);
+        if (removedIds.length > 0) await deleteFromSupabase(removedIds);
+
+        // Refrescamos la caché local
+        try { fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex)); } catch (e) { /* fs efímero */ }
+
+        if (embedded > 0 || removedIds.length > 0) {
+            console.log(`🔄 Sync: ${embedded} nuevos/cambiados vectorizados, ${removedIds.length} borrados. Total: ${aiIndex.length}.`);
+        } else {
+            debugLog(`🔄 Sync: sin cambios (${aiIndex.length} productos).`);
+        }
+    } catch (error) {
+        console.error("❌ Error en syncCatalog:", error.message);
+    } finally {
+        isSyncing = false;
     }
 }
 
@@ -1293,11 +1379,24 @@ app.post("/api/admin/reindex", async (req, res) => {
 /* ==========================================================================
    🚀 INICIO DEL SERVIDOR
    ========================================================================== */
+// Cada cuánto sincronizamos el catálogo automáticamente (por defecto: 6 horas).
+const SYNC_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS) || 6 * 60 * 60 * 1000;
+
 app.listen(PORT, async () => {
     console.log(`🚀 Server en http://localhost:${PORT}`);
-    // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
-    loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 
+    // 1. Carga inicial del índice (caché local -> Supabase -> Shopify) sin bloquear el arranque.
+    loadIndexes()
+        .then(() => {
+            // 2. Tras cargar, hacemos una sync incremental a los 2 min para captar
+            //    productos nuevos/cambiados desde la última vez (barato: solo lo que cambió).
+            setTimeout(() => { syncCatalog().catch(e => console.error("Sync inicial:", e.message)); }, 2 * 60 * 1000);
+        })
+        .catch(err => console.error("⚠️ Error en carga inicial:", err));
+
+    // 3. Sync incremental periódica automática (sin intervención manual).
+    setInterval(() => { syncCatalog().catch(e => console.error("Sync periódica:", e.message)); }, SYNC_INTERVAL_MS);
+    console.log(`🔄 Sincronización automática de catálogo cada ${Math.round(SYNC_INTERVAL_MS / 60000)} min.`);
 });
 
 

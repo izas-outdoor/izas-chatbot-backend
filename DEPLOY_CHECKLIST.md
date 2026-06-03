@@ -18,6 +18,7 @@ Variables de entorno (Render → Environment):
 - [ ] `ALLOWED_ORIGINS` = `https://www.izas-outdoor.com,https://izas-outdoor.com` (CORS)
 - [ ] `ADMIN_TOKEN` = una cadena secreta larga (para `/api/admin/reindex`)
 - [ ] *(opcional)* `SHOPIFY_API_VERSION`, `LIVE_STOCK_TTL_MS`, `DEBUG=false`
+- [ ] *(opcional)* `SYNC_INTERVAL_MS` — cada cuánto se sincroniza el catálogo automáticamente (por defecto 6h = `21600000`)
 
 Pasos:
 
@@ -59,13 +60,24 @@ Abre la tienda y el chat, y comprueba con la consola del navegador abierta:
 - [ ] Al abrir un chat, los mensajes se ven formateados (negritas/enlaces) y sin el ruido `[CONTEXTO SISTEMA...]`.
 - [ ] Si quitas las variables de entorno, sale el mensaje de error claro (no pantalla en blanco).
 
-## 6. Reindexar cuando cambies productos
+## 6. Productos nuevos: sincronización AUTOMÁTICA
 
-Cuando añadas/edites productos en Shopify, refresca el índice:
+Ya **no hace falta reindexar a mano**. El backend sincroniza el catálogo solo:
+
+- A los ~2 minutos de arrancar.
+- Cada `SYNC_INTERVAL_MS` (por defecto 6h) de forma indefinida.
+
+La sincronización es **incremental**: solo vectoriza productos **nuevos o cambiados**
+(detecta cambios por hash) y elimina los borrados. Reutiliza los embeddings de lo que
+no cambió, así que es barata aunque tengas muchos productos.
+
+### Forzar manualmente (opcional)
+
+Si quieres que un producto nuevo aparezca al instante sin esperar al ciclo:
 
 ```bash
 curl -X POST https://<tu-backend>/api/admin/reindex \
   -H "x-admin-token: TU_ADMIN_TOKEN"
 ```
 
-Responde al instante y reindexa en segundo plano (mira los logs).
+(Esto hace una reconstrucción completa. Para el día a día no es necesario.)
