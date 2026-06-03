@@ -11,6 +11,13 @@
    - Traducción forzada de Tallas (XXL -> 2XL).
    - Prompt anti-alucinaciones de stock.
    - Formato Extendido y Legible.
+
+   CORRECCIONES V4 (seguridad y robustez):
+   - Nuevo endpoint /api/chat/init (el frontend lo necesitaba).
+   - CORS restringido a dominios propios + rate limiting por IP.
+   - Límite de longitud en la query (anti-abuso/coste).
+   - Timeout real en Shopify vía AbortController.
+   - refineQuery protegido con try/catch (no tumba el endpoint).
    ========================================================================== */
 
 import express from "express";
@@ -48,8 +55,64 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-app.use(cors({ origin: "*" })); // Permite conexiones desde cualquier lugar
-app.use(express.json()); // Permite recibir datos JSON
+/* --- 🔒 CORS RESTRINGIDO ---
+   Solo permitimos peticiones desde nuestros propios dominios.
+   Puedes añadir o quitar orígenes en la variable de entorno ALLOWED_ORIGINS
+   (separados por comas). Si no existe, usamos los valores por defecto. */
+const DEFAULT_ORIGINS = [
+    "https://www.izas-outdoor.com",
+    "https://izas-outdoor.com",
+    "https://izas-outdoor.myshopify.com"
+];
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(",").map(s => s.trim())
+    : DEFAULT_ORIGINS);
+
+app.use(cors({
+    origin: (origin, callback) => {
+        // Permitimos peticiones sin origin (apps móviles, curl, healthchecks)
+        if (!origin) return callback(null, true);
+        if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+        console.warn(`⛔ CORS bloqueado para origen: ${origin}`);
+        return callback(new Error("Origen no permitido por CORS"));
+    }
+}));
+app.use(express.json({ limit: "100kb" })); // Permite recibir datos JSON (con límite de tamaño)
+
+/* --- 🚦 RATE LIMITING (sin dependencias) ---
+   Limita el número de peticiones por IP en una ventana de tiempo.
+   Evita que alguien abuse del endpoint y dispare costes de OpenAI. */
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minuto
+const RATE_LIMIT_MAX = 20;              // 20 peticiones por minuto por IP
+const rateBuckets = new Map();          // ip -> { count, resetAt }
+
+function rateLimiter(req, res, next) {
+    const ip = (req.headers["x-forwarded-for"] || req.ip || "desconocida")
+        .toString().split(",")[0].trim();
+    const now = Date.now();
+    let bucket = rateBuckets.get(ip);
+
+    if (!bucket || now > bucket.resetAt) {
+        bucket = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+        rateBuckets.set(ip, bucket);
+    }
+
+    bucket.count++;
+    if (bucket.count > RATE_LIMIT_MAX) {
+        const retryAfter = Math.ceil((bucket.resetAt - now) / 1000);
+        res.set("Retry-After", String(retryAfter));
+        return res.status(429).json({ error: "Demasiadas peticiones. Inténtalo en unos segundos." });
+    }
+    next();
+}
+
+// Limpieza periódica de buckets viejos para no acumular memoria
+setInterval(() => {
+    const now = Date.now();
+    for (const [ip, bucket] of rateBuckets) {
+        if (now > bucket.resetAt) rateBuckets.delete(ip);
+    }
+}, 5 * 60 * 1000);
 
 // Credenciales Shopify
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE;
@@ -57,6 +120,13 @@ const ADMIN_TOKEN = process.env.SHOPIFY_ADMIN_TOKEN;
 
 // Credenciales OpenAI
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// 🐞 Modo depuración: si DEBUG !== "true", silenciamos los logs ruidosos.
+const DEBUG = process.env.DEBUG === "true";
+const debugLog = (...args) => { if (DEBUG) console.log(...args); };
+
+// 🛍️ Versión de la API de Shopify (configurable por env para no quedar obsoleta).
+const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2024-01";
 
 
 /* ==========================================================================
@@ -148,6 +218,27 @@ function safeParse(value) {
     try { return JSON.parse(value); } catch { return value; }
 }
 
+// 👋 Detecta saludos / charla trivial para ahorrarnos 3 llamadas a OpenAI.
+// Conservador: solo corta si TODO el mensaje es un saludo corto sin intención de producto.
+const SMALLTALK_PATTERNS = [
+    /^hola+$/, /^buenas( tardes| noches| dias| días)?$/, /^hey$/, /^holi+$/,
+    /^gracias( muchas)?$/, /^muchas gracias$/, /^ok(ay)?$/, /^vale$/, /^genial$/,
+    /^perfecto$/, /^adios$/, /^adiós$/, /^hasta luego$/, /^buenos dias$/, /^buenos días$/
+];
+function isSmallTalk(text) {
+    const t = (text || "").toLowerCase().trim().replace(/[!¡.,…]+$/g, "").replace(/\s+/g, " ");
+    if (t.length === 0 || t.length > 25) return false;
+    // Si menciona algo que parece producto/pedido, NO es small talk
+    if (/\d{3,}|@|talla|precio|envio|envío|pedido|devol|cambio|stock|chaqueta|pantalon|comprar/.test(t)) return false;
+    return SMALLTALK_PATTERNS.some(re => re.test(t));
+}
+function smallTalkReply(text) {
+    const t = (text || "").toLowerCase();
+    if (/gracias/.test(t)) return "¡A ti! 🏔️ Si necesitas algo más (productos, tallas, envíos o tu pedido), aquí estoy.";
+    if (/adios|adiós|hasta luego/.test(t)) return "¡Hasta pronto! Que disfrutes la montaña. 🏔️";
+    return "¡Hola! 👋 ¿En qué puedo ayudarte? Puedo buscarte productos, resolver dudas de tallas, envíos o devoluciones, o consultar tu pedido.";
+}
+
 // Extractor robusto de JSON (para cuando GPT mete texto antes o después)
 function extractJSON(str) {
     const first = str.indexOf('{');
@@ -165,9 +256,13 @@ function extractJSON(str) {
 
 // 🔥 FUNCIÓN MEJORADA: Incluye sistema de reintentos (Retries)
 async function fetchGraphQL(query, variables = {}, retries = 3) {
-    const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/graphql.json`;
+    const url = `https://${SHOPIFY_STORE}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
     
     for (let i = 0; i < retries; i++) {
+        // 🔥 FIX: node-fetch v3 ignora la opción 'timeout'. Usamos AbortController
+        // para cortar de verdad las peticiones que se cuelgan (10s máximo).
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
         try {
             const res = await fetch(url, {
                 method: "POST",
@@ -176,9 +271,9 @@ async function fetchGraphQL(query, variables = {}, retries = 3) {
                     "Content-Type": "application/json",
                 },
                 body: JSON.stringify({ query, variables }),
-                timeout: 10000 // 10 segundos máximo por petición
+                signal: controller.signal // 10 segundos máximo por petición
             });
-            
+
             if (!res.ok) {
                 throw new Error(`Shopify Error ${res.status}: ${res.statusText}`);
             }
@@ -198,6 +293,8 @@ async function fetchGraphQL(query, variables = {}, retries = 3) {
             const waitTime = 1000 * (i + 1); // 1s, 2s, 3s...
             console.warn(`⚠️ Error red (${error.message}). Reintentando en ${waitTime}ms... (${i + 1}/${retries})`);
             await new Promise(r => setTimeout(r, waitTime));
+        } finally {
+            clearTimeout(timeoutId); // Evitamos fugas de timers
         }
     }
 }
@@ -291,14 +388,33 @@ async function getAllProducts() {
 }
 
 // ⚡ LIVE STOCK CHECK: Actualiza el stock de productos específicos en tiempo real
+// 🗃️ CACHE DE STOCK EN VIVO (TTL corto)
+// Evita preguntar a Shopify por el mismo producto en cada mensaje.
+// id -> { variants (solo datos de stock), ts }
+const liveStockCache = new Map();
+const LIVE_STOCK_TTL_MS = Number(process.env.LIVE_STOCK_TTL_MS) || 60 * 1000; // 60s por defecto
+
 // 🔥 FIX CRÍTICO: Mantiene precios e imágenes si el check rápido no los trae
 async function getLiveStockForProducts(products) {
     if (!products || products.length === 0) return products;
 
-    console.log("⚡ Actualizando stock en tiempo real para", products.length, "productos...");
+    const now = Date.now();
 
-    // Preparamos los IDs para Shopify
-    const productIds = products.map(p => `gid://shopify/Product/${p.id}`);
+    // Separamos lo que tenemos fresco en cache de lo que hay que pedir a Shopify
+    const staleProducts = products.filter(p => {
+        const cached = liveStockCache.get(String(p.id));
+        return !cached || (now - cached.ts) > LIVE_STOCK_TTL_MS;
+    });
+
+    debugLog(`⚡ Stock: ${products.length} pedidos, ${staleProducts.length} a Shopify (resto cache).`);
+
+    // Si TODO está fresco en cache, no llamamos a Shopify
+    if (staleProducts.length === 0) {
+        return products.map(p => applyCachedStock(p));
+    }
+
+    // Preparamos los IDs SOLO de los productos caducados
+    const productIds = staleProducts.map(p => `gid://shopify/Product/${p.id}`);
 
     const query = `
     query getNodes($ids: [ID!]!) {
@@ -323,48 +439,59 @@ async function getLiveStockForProducts(products) {
 
     try {
         const data = await fetchGraphQL(query, { ids: productIds });
-        
-        if (!data || !data.nodes) return products;
 
-        // Actualizamos los productos en memoria con los datos frescos
-        return products.map(p => {
-            // Buscamos el nodo fresco correspondiente
-            const freshNode = data.nodes.find(n => n && n.id.endsWith(`/${p.id}`));
-            
-            if (!freshNode) return p; // Si falla, devolvemos el viejo
-
-            // Mapeamos las nuevas variantes preservando datos antiguos importantes (Precio/Img)
-            const freshVariants = freshNode.variants.edges.map(v => {
-                const variantId = v.node.id.split("/").pop();
-                // Buscamos la variante antigua para recuperar precio e imagen si faltan
-                const oldVariant = p.variants.find(oldV => oldV.id === variantId);
-
-                return {
-                    id: variantId,
+        // Guardamos en cache los nodos frescos que sí han llegado
+        if (data && data.nodes) {
+            for (const freshNode of data.nodes) {
+                if (!freshNode) continue;
+                const id = freshNode.id.split("/").pop();
+                const stockVariants = freshNode.variants.edges.map(v => ({
+                    id: v.node.id.split("/").pop(),
                     title: v.node.title,
-                    // Mantenemos precio e imagen del índice (son pesados y cambian poco)
-                    price: oldVariant?.price || "Consultar",
-                    image: oldVariant?.image || "",
-                    // DATOS CLAVE ACTUALIZADOS:
                     inventoryQuantity: v.node.inventoryQuantity,
                     availableForSale: v.node.availableForSale,
                     selectedOptions: v.node.selectedOptions
-                };
-            });
+                }));
+                liveStockCache.set(String(id), { variants: stockVariants, ts: Date.now() });
+            }
+        }
 
-            return { ...p, variants: freshVariants };
-        });
+        // Devolvemos TODOS los productos aplicando el stock cacheado (recién o no)
+        return products.map(p => applyCachedStock(p));
 
     } catch (error) {
         console.error("❌ Error actualizando stock live:", error);
-        return products; // En caso de error, usamos el caché
+        return products; // En caso de error, usamos el índice tal cual
     }
+}
+
+// Aplica el stock cacheado a un producto, conservando precio e imagen del índice.
+function applyCachedStock(product) {
+    const cached = liveStockCache.get(String(product.id));
+    if (!cached) return product; // Sin datos frescos: devolvemos el producto tal cual
+
+    const mergedVariants = cached.variants.map(sv => {
+        const oldVariant = product.variants.find(oldV => oldV.id === sv.id);
+        return {
+            id: sv.id,
+            title: sv.title,
+            // Precio e imagen vienen del índice (pesan y cambian poco)
+            price: oldVariant?.price || "Consultar",
+            image: oldVariant?.image || "",
+            // Datos de stock frescos desde cache
+            inventoryQuantity: sv.inventoryQuantity,
+            availableForSale: sv.availableForSale,
+            selectedOptions: sv.selectedOptions
+        };
+    });
+
+    return { ...product, variants: mergedVariants };
 }
 
 // 🚚 RASTREADOR DE PEDIDOS: Busca estado, tracking y transportista
 async function getOrderStatus(orderId, userEmail) {
     const cleanId = orderId.replace("#", "").trim();
-    console.log(`🔍 Consultando Shopify para ID: ${cleanId}, Email user: ${userEmail}`);
+    debugLog(`🔍 Consultando Shopify para ID: ${cleanId}, Email user: ${userEmail}`);
 
     const query = `
     query getOrder($query: String!) {
@@ -515,6 +642,7 @@ async function loadIndexes() {
 
 // 🧹 REFINAMIENTO: Traduce "quiero unos pantalones" a una query técnica
 async function refineQuery(userQuery, history) {
+  try {
     const response = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: [
@@ -539,6 +667,11 @@ async function refineQuery(userQuery, history) {
         temperature: 0
     });
     return response.choices[0].message.content;
+  } catch (error) {
+    // Si OpenAI falla aquí, no tumbamos el endpoint: seguimos con la query original.
+    console.error("⚠️ refineQuery falló, uso la query original:", error.message);
+    return userQuery;
+  }
 }
 
 // 🛡️ FORMATO DE STOCK SEGURO: Agrupa por color y oculta cantidades exactas
@@ -591,10 +724,37 @@ function formatStockForAI(variants) {
 /* ==========================================================================
    🚪 ENDPOINT PRINCIPAL (/api/ai/search)
    ========================================================================== */
-app.post("/api/ai/search", async (req, res) => {
+app.post("/api/ai/search", rateLimiter, async (req, res) => {
     // 🔥🔥 AÑADIDO: 'context_handle' para saber dónde está el usuario
     const { q, history, visible_ids, session_id, context_handle } = req.body;
-    if (!q) return res.status(400).json({ error: "Falta query" });
+    if (!q || typeof q !== "string" || !q.trim()) {
+        return res.status(400).json({ error: "Falta query" });
+    }
+    // 🛡️ Límite de longitud: evita prompt injection masivo y costes desbocados
+    if (q.length > 1000) {
+        return res.status(400).json({ error: "La consulta es demasiado larga." });
+    }
+
+    // 👋 ATAJO SMALL TALK: si es solo un saludo/agradecimiento, respondemos sin
+    // gastar las 3 llamadas a OpenAI (refine + embedding + chat). Solo si no hay
+    // producto en pantalla (en ese caso sí queremos el contexto del producto).
+    if (!context_handle && isSmallTalk(q)) {
+        const reply = smallTalkReply(q);
+        // Guardamos la interacción en Supabase sin bloquear la respuesta
+        const sid = session_id || "anonimo";
+        const turn = [
+            { role: "user", content: q, timestamp: new Date().toISOString() },
+            { role: "assistant", content: reply, timestamp: new Date().toISOString() }
+        ];
+        supabase.from('chat_sessions').upsert({
+            session_id: sid,
+            conversation: [...(history || []), ...turn],
+            category: "GENERAL",
+            updated_at: new Date()
+        }, { onConflict: 'session_id' }).then(({ error }) => { if (error) console.error("❌ Error Supabase (smalltalk):", error.message); });
+
+        return res.json({ products: [], text: reply, isSizeContext: false });
+    }
 
     try {
         // ---------------------------------------------------------
@@ -850,7 +1010,7 @@ app.post("/api/ai/search", async (req, res) => {
         // 4. 🖼️ PROCESADO FINAL BLINDADO (SANITIZACIÓN)
         // ---------------------------------------------------------
         const rawContent = completion.choices[0].message.content;
-        console.log("RAW OPENAI RESPONSE:", rawContent);
+        debugLog("RAW OPENAI RESPONSE:", rawContent);
 
         let aiContent;
         try {
@@ -958,9 +1118,37 @@ app.post("/api/ai/search", async (req, res) => {
 });
 
 /* ==========================================================================
+   👋 ENDPOINT DE INICIO (/api/chat/init)
+   ==========================================================================
+   El frontend llama a este endpoint al abrir el chat por primera vez.
+   Devuelve el saludo inicial y registra la apertura de sesión en Supabase. */
+const WELCOME_MESSAGE = "¡Hola! Soy el asistente experto de Izas. 🏔️ ¿En qué puedo ayudarte? Puedo buscarte productos, resolver dudas de tallas, envíos o devoluciones, o consultar el estado de tu pedido.";
+
+app.post("/api/chat/init", rateLimiter, async (req, res) => {
+    const { session_id } = req.body || {};
+
+    // Guardamos el saludo en el historial de la sesión (sin bloquear la respuesta)
+    if (session_id) {
+        supabase.from('chat_sessions').upsert({
+            session_id: session_id,
+            conversation: [{
+                role: "assistant",
+                content: WELCOME_MESSAGE,
+                timestamp: new Date().toISOString()
+            }],
+            category: "GENERAL",
+            updated_at: new Date()
+        }, { onConflict: 'session_id' })
+        .then(({ error }) => { if (error) console.error("❌ Error init Supabase:", error.message); });
+    }
+
+    res.json({ text: WELCOME_MESSAGE });
+});
+
+/* ==========================================================================
    📝 ENDPOINT PARA GUARDAR LOGS MANUALES (Feedback, Botones, etc.)
    ========================================================================== */
-app.post("/api/chat/log", async (req, res) => {
+app.post("/api/chat/log", rateLimiter, async (req, res) => {
     const { session_id, role, content } = req.body;
 
     if (!session_id || !role || !content) return res.status(400).json({ error: "Faltan datos" });
@@ -994,13 +1182,27 @@ app.post("/api/chat/log", async (req, res) => {
 
         if (error) throw error;
 
-        console.log(`💾 Log manual guardado para sesión ${session_id}: ${content}`);
+        debugLog(`💾 Log manual guardado para sesión ${session_id}: ${content}`);
         res.json({ success: true });
 
     } catch (error) {
         console.error("❌ Error guardando log manual:", error);
         res.status(500).json({ error: "Error interno" });
     }
+});
+
+/* ==========================================================================
+   ❤️ HEALTHCHECK (/health)
+   ==========================================================================
+   Útil para que Render (u otro monitor) sepa si el servicio está vivo y si
+   el índice de productos ya se ha cargado en memoria. */
+app.get("/health", (req, res) => {
+    res.json({
+        status: "ok",
+        productsIndexed: aiIndex.length,
+        faqsIndexed: faqIndex.length,
+        uptimeSeconds: Math.round(process.uptime())
+    });
 });
 
 /* ==========================================================================
