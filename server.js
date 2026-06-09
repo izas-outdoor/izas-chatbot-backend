@@ -1279,23 +1279,6 @@ app.post("/api/ai/search", rateLimiter, async (req, res) => {
 const WELCOME_MESSAGE = "¡Hola! Soy el asistente experto de Izas. 🏔️ ¿En qué puedo ayudarte? Puedo buscarte productos, resolver dudas de tallas, envíos o devoluciones, o consultar el estado de tu pedido.";
 
 app.post("/api/chat/init", rateLimiter, async (req, res) => {
-    const { session_id } = req.body || {};
-
-    // Guardamos el saludo en el historial de la sesión (sin bloquear la respuesta)
-    if (session_id) {
-        supabase.from('chat_sessions').upsert({
-            session_id: session_id,
-            conversation: [{
-                role: "assistant",
-                content: WELCOME_MESSAGE,
-                timestamp: new Date().toISOString()
-            }],
-            category: "GENERAL",
-            updated_at: new Date()
-        }, { onConflict: 'session_id' })
-        .then(({ error }) => { if (error) console.error("❌ Error init Supabase:", error.message); });
-    }
-
     res.json({ text: WELCOME_MESSAGE });
 });
 
