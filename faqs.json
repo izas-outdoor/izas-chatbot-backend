@@ -60,6 +60,11 @@
     "answer": "¡Claro! Si están disponibles, te contestarán por aquí. Si no, escríbenos a info@izas-outdoor.com y te responderemos lo antes posible."
   },
   {
+    "id": "horario_laboral",
+    "question": "¿Cuál es vuestro horario laboral?",
+    "answer": "Nuestro horario laboral es de lunea a jueves de 08:00 a 17:00 y viernes de 07:00 a 15:00. En verano de lunes a viernes de 07:00 a 15:00. En tiendas físicas el horario laboral es de 10:00 a 22:00 en general, aunque puede variar dependiendo de la ubicación de cada tienda"
+  },
+  {
     "id": "financiacion",
     "question": "¿Puedo financiar mi compra?",
     "answer": "Sí, puedes financiar tu compra a 3, 6 o 12 meses. Verás la opción y las condiciones durante el proceso de pago."
