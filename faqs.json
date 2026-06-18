@@ -2,17 +2,17 @@
   {
     "id": "plazo_devolucion",
     "question": "¿Cuál es el plazo para hacer cambios o devoluciones?",
-    "answer": "El plazo es de 30 días desde la recepción del pedido. En campañas especiales como Black Friday o Rebajas, las políticas de devoluciones podrían cambiar (a 60 días por ejemplo)."
+    "answer": "El plazo es de 30 días desde la recepción del pedido. En campañas especiales como Black Friday o Rebajas, el plazo se puede ampliar a 60 días."
   },
   {
     "id": "como_devolver",
     "question": "¿Cómo puedo realizar un cambio o devolución?",
-    "answer": "Para comenzar, entra en este enlace: https://returns.reveni.io/izas-outdoor y necesitarás tu número de pedido y el correo de compra. Sigue las instrucciones del portal."
+    "answer": "Para comenzar, entra en este enlace: https://returns.reveni.io/izas-outdoor. Necesitarás tu número de pedido y el correo de compra. Sigue las instrucciones del portal."
   },
   {
     "id": "coste_devolucion",
     "question": "¿Cuánto cuesta hacer un cambio o devolución?",
-    "answer": "Los cambios son gratuitos (si realizas todos los cambios de un pedido a la vez). Las devoluciones tienen un coste de 4,99€ si se hacen por transporte, o son gratuitas si las realizas en una tienda oficial Izas. Para optimizar el proceso de transporte y disminuir la huella medioambiental se premiará con cambio gratuito a todo aquel que realice todos los cambios dentro de un mismo pedido, en una única solicitud, es decir, si tú has comprado 5 prendas y decides cambiar hoy 4 de ellas, esos 4 cambios serán gratis, pero si pasado una semana decides cambiar esa otra prenda de ese mismo pedido, se aplicará un coste de transporte de 2,99€. Todos los cambios que provengan de un cambio anterior (cambio después de haber cambiado un producto anteriormente) también contarán con esa tarifa.   "
+    "answer": "Los cambios son gratuitos (si realizas todos los cambios de un pedido a la vez). Las devoluciones tienen un coste de 4,99€ si se hacen por transporte, o son gratuitas si las realizas en una tienda oficial Izas."
   },
   {
     "id": "producto_defectuoso",
@@ -22,7 +22,7 @@
   {
     "id": "reembolso_dinero",
     "question": "¿Cómo y cuándo recibiré mi reembolso?",
-    "answer": "El reembolso es instantáneo. Puedes elegir recibirlo por transferencia bancaria (en segundos) o en el método de pago original (puede tardar 1-3 días). Dependiendo de la entidad bancaria podría variar o tardar más días en verse reflejado en cuenta el reembolso desde el momento que se ha procesado. Recuerda que no se reembolsan los gastos de envío originales."
+    "answer": "El reembolso es instantáneo. Puedes elegir recibirlo por transferencia bancaria (en segundos) o en el método de pago original (puede tardar 1-3 días). Recuerda que no se reembolsan los gastos de envío originales."
   },
   {
     "id": "devolucion_tienda",
@@ -47,7 +47,7 @@
   {
     "id": "coste_envio",
     "question": "¿Cuánto cuestan los gastos de envío?",
-    "answer": "El envío es GRATIS para pedidos superiores a 49,99€. Para pedidos inferiores, el coste es de 4,99€."
+    "answer": "El envío es GRATIS para pedidos superiores a 39,99€. Para pedidos inferiores, el coste es de 4,99€."
   },
   {
     "id": "devolucion_externa",
@@ -57,7 +57,7 @@
   {
     "id": "contacto_agente",
     "question": "¿Puedo hablar con un agente humano?",
-    "answer": "¡Claro! Escríbenos a info@izas-outdoor.com o llama al 976502040 dentro del horario laboral y te responderemos lo antes posible."
+    "answer": "¡Claro! Si están disponibles, te contestarán por aquí. Si no, escríbenos a info@izas-outdoor.com y te responderemos lo antes posible."
   },
   {
     "id": "financiacion",
@@ -79,24 +79,114 @@
     "question": "¿Por qué mi número de seguimiento no funciona en Correos?",
     "answer": "Si la web de Correos sale en blanco, contáctanos en info@izas-outdoor.com con el asunto 'Incidencia Seguimiento - [Tu Pedido]'. Podría ser una incidencia logística que debemos reclamar."
   },
-   {
-    "id": "guia_tallas",
-    "question": "¿Dónde puedo ver la guía de tallas?",
-    "answer": "Podrás encontrar la guía de tallas en la propia ficha de producto, clicando en Medidas del Producto. Ahí podrás encontrar las medidas de la prenda para poder comparar con otras prendas que tengas en casa."
-  },
   {
     "id": "ausente_casa",
     "question": "No estaba en casa y han dejado el paquete en un punto de recogida",
     "answer": "Si no estabas, el transportista puede dejarlo en un punto cercano para agilizar. Si necesitas entrega en domicilio obligatoria, escríbenos a info@izas-outdoor.com para intentar reprogramarlo."
   },
-    {
-    "id": "newsletter",
-    "question": "¿Cómo me suscribo a la newsletter?",
-    "answer": "Para suscribirte a la newsletter puedes hacerlo fácilmente a través de este enlace: https://www.izas-outdoor.com/pages/newsletter"
+  {
+    "id": "members_que_es",
+    "question": "¿Qué es Izas Members?",
+    "answer": "Izas Members es nuestro programa de fidelización. Por cada compra, online o en tienda física, acumulas puntos que puedes usar como descuento en compras futuras. Cuanto más compras, más subes de nivel (Bronce, Plata, Oro) y más ventajas obtienes: envíos gratis desde menos importe, más puntos por euro, regalo de cumpleaños y acceso anticipado a novedades."
+  },
+  {
+    "id": "members_como_apuntarse",
+    "question": "¿Cómo me hago socio de Izas Members?",
+    "answer": "Puedes darte de alta en cualquier tienda física pidiéndolo al personal, o tú mismo desde la sección «Izas Members» de la tienda online. Te llegará un email de confirmación: debes hacer clic en el enlace para activar tu cuenta (es obligatorio por protección de datos). Si no lo ves, revisa la carpeta de spam. Una vez confirmado, empiezas a ganar puntos desde tu siguiente compra."
+  },
+  {
+    "id": "members_como_ganar_puntos",
+    "question": "¿Cómo gano puntos con Izas Members?",
+    "answer": "La regla básica es 1 punto por cada euro gastado, tanto en compras online como en tienda física. También ganas puntos el día de tu cumpleaños (regalo de puntos) y por el programa de referidos (invitar amigos). Además, en fechas especiales puede haber promociones con puntos multiplicados."
+  },
+  {
+    "id": "members_puntos_tienda_fisica",
+    "question": "¿Cuándo se actualizan mis puntos si compro en tienda física?",
+    "answer": "Los puntos de tienda física se actualizan cada noche, no en tiempo real: si compras hoy, verás los puntos reflejados al día siguiente. No necesitas identificarte en caja, tu compra se vincula automáticamente a tu cuenta de socio."
+  },
+  {
+    "id": "members_puntos_online",
+    "question": "¿Cuándo se añaden los puntos de una compra online?",
+    "answer": "Los puntos se añaden automáticamente en cuanto tu pedido queda confirmado y pagado. Si el pedido está pendiente de pago o sin confirmar, los puntos no aparecerán hasta que se complete."
+  },
+  {
+    "id": "members_niveles",
+    "question": "¿Qué niveles tiene Izas Members y cómo subo de nivel?",
+    "answer": "Hay tres niveles según lo que hayas gastado en los últimos 12 meses (online + tienda): Bronce (menos de 200€), Plata (de 200€ a 499€) y Oro (500€ o más). El nivel se recalcula cada noche, así que si tu gasto de los últimos 12 meses baja del umbral, el nivel también baja automáticamente. Cada cambio de nivel te llega por email."
+  },
+  {
+    "id": "members_ventajas_nivel",
+    "question": "¿Qué ventajas tengo según mi nivel en Izas Members (Bronce, Plata, Oro)?",
+    "answer": "Bronce: envío gratis desde 59,99€ y regalo de cumpleaños de 100 puntos. Plata: envío gratis desde 49,99€, +10% de puntos en compras de 200€ o más, acceso anticipado a colecciones y 150 puntos de regalo de cumpleaños. Oro: envío siempre gratis, +20% de puntos en compras de 200€ o más, acceso anticipado y 200 puntos de regalo de cumpleaños más un cupón del 10% válido 7 días."
+  },
+  {
+    "id": "members_multiplicador_puntos",
+    "question": "¿Hay bonus de puntos por comprar más de 200€ siendo socio Plata u Oro?",
+    "answer": "Sí. En compras de 200€ o más, los socios Plata ganan un 10% extra de puntos (×1,1) y los socios Oro un 20% extra (×1,2). Por ejemplo, una compra de 250€ siendo Oro da 300 puntos en lugar de 250. Aplica tanto online como en tienda."
+  },
+  {
+    "id": "members_promos_puntos",
+    "question": "¿Hay promociones para ganar más puntos en Izas Members?",
+    "answer": "Sí, en fechas concretas anunciadas con antelación se pueden multiplicar los puntos (por ejemplo ×2). Estas promociones se combinan con el bonus de nivel: si coincide una promo ×2 con el bonus Oro en una compra de más de 200€, el multiplicador final sería ×2,4."
+  },
+  {
+    "id": "members_como_canjear",
+    "question": "¿Cómo canjeo mis puntos de Izas Members?",
+    "answer": "Cada punto vale 0,05€ (100 puntos = 5€). El canje mínimo es de 100 puntos y la compra donde lo usas debe ser de al menos 30€. Puedes canjear todos tus puntos o solo una parte; el resto se queda guardado para otra compra. El canje se hace distinto online y en tienda física."
+  },
+  {
+    "id": "members_canje_online",
+    "question": "¿Cómo canjeo puntos en la tienda online?",
+    "answer": "Entra en tu cuenta de izas-outdoor.com, ve a tu panel de Izas Members e indica los puntos que quieres canjear. Se generará un código de descuento de un solo uso que debes introducir en el paso de pago. Ojo: el código tiene validez de solo unas horas, úsalo en la misma sesión de compra."
+  },
+  {
+    "id": "members_canje_tienda",
+    "question": "¿Cómo canjeo puntos en tienda física?",
+    "answer": "Dile al personal de tienda que quieres canjear puntos. Te buscarán en el sistema por tu email o escaneando tu código QR, les indicas cuántos puntos quieres usar y ellos generan el código para aplicarlo en caja."
+  },
+  {
+    "id": "members_caducidad_puntos",
+    "question": "¿Cuándo caducan los puntos de Izas Members?",
+    "answer": "Los puntos caducan 365 días después de haberse ganado, cada compra con su propia fecha. Antes de caducar recibirás avisos por email (30, 15 y 1 día antes). Una vez caducados, los puntos no se pueden recuperar; la forma más fácil de no perderlos es hacer una compra y canjearlos antes del aviso final."
+  },
+  {
+    "id": "members_google_wallet",
+    "question": "¿Puedo añadir mi tarjeta de Izas Members a Google Wallet?",
+    "answer": "Sí, desde tu panel de Izas Members en la web hay una opción «Añadir a Google Wallet» (disponible en Android). La tarjeta muestra tu nombre, nivel, saldo de puntos y tu código QR para identificarte en tienda, y se actualiza sola cuando cambian tus puntos o nivel."
+  },
+  {
+    "id": "members_referidos",
+    "question": "¿Cómo funciona el programa de referidos de Izas Members?",
+    "answer": "Al registrarte recibes un enlace de invitación único. Si un amigo se registra a través de ese enlace y hace su primera compra, ambos recibís 50 puntos automáticamente (concepto «Bonus referido» en el historial). Puedes invitar a tantos amigos como quieras, aunque el premio como invitador tiene un máximo de 10 referidos premiados de por vida. El enlace está en la sección «Referidos» de tu panel."
+  },
+  {
+    "id": "members_acceso_anticipado",
+    "question": "¿Qué es el acceso anticipado a colecciones de Izas Members?",
+    "answer": "Los socios Plata y Oro pueden ver y comprar ciertas colecciones antes de que estén disponibles para el público general. Se avisa por email cuando hay una colección con acceso anticipado, y al tener la sesión iniciada en la web el acceso se activa automáticamente, sin nada que hacer aparte de eso. Cada colección tiene su propia ventana de tiempo antes de abrirse a todos."
+  },
+  {
+    "id": "members_puntos_no_aparecen",
+    "question": "No veo mis puntos de Izas Members después de comprar, ¿qué hago?",
+    "answer": "Si compraste en tienda física, espera al día siguiente (los puntos se sincronizan cada noche). Si fue una compra online, comprueba que el pedido esté confirmado y pagado. Si ha pasado más de 24 horas desde que se cumplieron esas condiciones y aún no aparecen, contáctanos indicando fecha e importe aproximado."
+  },
+  {
+    "id": "members_combinar_descuentos",
+    "question": "¿Puedo combinar el descuento de puntos de Izas Members con otros cupones?",
+    "answer": "El canje de puntos genera un código de descuento que funciona como cualquier cupón. Si es compatible con otra promoción depende de cómo esté configurada esa promoción en cada momento, así que si tienes dudas sobre una combinación concreta, consúltanos antes de finalizar la compra."
+  },
+  {
+    "id": "members_devolucion_puntos",
+    "question": "¿Qué pasa con mis puntos de Izas Members si devuelvo una compra?",
+    "answer": "Si se realiza el abono de la devolución, los puntos asociados a esa compra se deducen automáticamente de tu saldo. Si la devolución es parcial, los puntos se ajustan en proporción."
+  },
+  {
+    "id": "members_puntos_transferibles",
+    "question": "¿Puedo transferir mis puntos de Izas Members a otra persona?",
+    "answer": "No, los puntos son personales e intransferibles. Están vinculados a tu cuenta y solo tú puedes usarlos."
+  },
+  {
+    "id": "members_baja_o_cambios_cuenta",
+    "question": "¿Cómo me doy de baja de Izas Members o cambio el email de mi cuenta?",
+    "answer": "Tanto la baja del programa como el cambio de email de tu cuenta no se pueden hacer desde el panel, así que tienes que escribirnos a info@izas-outdoor.com y lo gestionamos manualmente. Si te das de baja, los puntos pendientes no podrán usarse una vez sea efectiva."
   }
 ]
-
-
-
-
-

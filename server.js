@@ -11,13 +11,6 @@
    - Traducción forzada de Tallas (XXL -> 2XL).
    - Prompt anti-alucinaciones de stock.
    - Formato Extendido y Legible.
-
-   CORRECCIONES V4 (seguridad y robustez):
-   - Nuevo endpoint /api/chat/init (el frontend lo necesitaba).
-   - CORS restringido a dominios propios + rate limiting por IP.
-   - Límite de longitud en la query (anti-abuso/coste).
-   - Timeout real en Shopify vía AbortController.
-   - refineQuery protegido con try/catch (no tumba el endpoint).
    ========================================================================== */
 
 import express from "express";
@@ -25,7 +18,6 @@ import "dotenv/config";
 import fetch from "node-fetch";
 import OpenAI from "openai";
 import fs from "fs";
-import crypto from "crypto";
 import cors from "cors";
 import { COLOR_CONCEPTS, CONCEPTS } from "./concepts.js"; // Diccionarios de sinónimos
 import { createClient } from "@supabase/supabase-js";
@@ -49,6 +41,9 @@ DISTRIBUCIÓN Y VENTA:
 
 CALIDAD:
 Usamos costuras termoselladas en prendas impermeables y patrones ergonómicos para la libertad de movimiento.
+
+PROGRAMA DE FIDELIZACIÓN (IZAS MEMBERS):
+Tenemos un programa de fidelización llamado Izas Members: puntos por compra, niveles (Bronce/Plata/Oro) con ventajas como envíos gratis y descuentos. Menciónalo solo de forma breve y cuando sea relevante (p. ej. si preguntan por descuentos, ahorrar, o cómo fidelizar), y no lo repitas si ya lo mencionaste antes en la conversación. Para el detalle de cómo funciona (alta, puntos, canje, niveles, etc.), usa la información de las FAQs.
 `;
 
 /* --- ⚙️ CONFIGURACIÓN DEL SERVIDOR --- */
@@ -56,64 +51,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-/* --- 🔒 CORS RESTRINGIDO ---
-   Solo permitimos peticiones desde nuestros propios dominios.
-   Puedes añadir o quitar orígenes en la variable de entorno ALLOWED_ORIGINS
-   (separados por comas). Si no existe, usamos los valores por defecto. */
-const DEFAULT_ORIGINS = [
-    "https://www.izas-outdoor.com",
-    "https://izas-outdoor.com",
-    "https://izas-outdoor.myshopify.com"
-];
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(",").map(s => s.trim())
-    : DEFAULT_ORIGINS);
-
-app.use(cors({
-    origin: (origin, callback) => {
-        // Permitimos peticiones sin origin (apps móviles, curl, healthchecks)
-        if (!origin) return callback(null, true);
-        if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
-        console.warn(`⛔ CORS bloqueado para origen: ${origin}`);
-        return callback(new Error("Origen no permitido por CORS"));
-    }
-}));
-app.use(express.json({ limit: "100kb" })); // Permite recibir datos JSON (con límite de tamaño)
-
-/* --- 🚦 RATE LIMITING (sin dependencias) ---
-   Limita el número de peticiones por IP en una ventana de tiempo.
-   Evita que alguien abuse del endpoint y dispare costes de OpenAI. */
-const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minuto
-const RATE_LIMIT_MAX = 20;              // 20 peticiones por minuto por IP
-const rateBuckets = new Map();          // ip -> { count, resetAt }
-
-function rateLimiter(req, res, next) {
-    const ip = (req.headers["x-forwarded-for"] || req.ip || "desconocida")
-        .toString().split(",")[0].trim();
-    const now = Date.now();
-    let bucket = rateBuckets.get(ip);
-
-    if (!bucket || now > bucket.resetAt) {
-        bucket = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
-        rateBuckets.set(ip, bucket);
-    }
-
-    bucket.count++;
-    if (bucket.count > RATE_LIMIT_MAX) {
-        const retryAfter = Math.ceil((bucket.resetAt - now) / 1000);
-        res.set("Retry-After", String(retryAfter));
-        return res.status(429).json({ error: "Demasiadas peticiones. Inténtalo en unos segundos." });
-    }
-    next();
-}
-
-// Limpieza periódica de buckets viejos para no acumular memoria
-setInterval(() => {
-    const now = Date.now();
-    for (const [ip, bucket] of rateBuckets) {
-        if (now > bucket.resetAt) rateBuckets.delete(ip);
-    }
-}, 5 * 60 * 1000);
+app.use(cors({ origin: "*" })); // Permite conexiones desde cualquier lugar
+app.use(express.json()); // Permite recibir datos JSON
 
 // Credenciales Shopify
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE;
@@ -121,13 +60,6 @@ const ADMIN_TOKEN = process.env.SHOPIFY_ADMIN_TOKEN;
 
 // Credenciales OpenAI
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-// 🐞 Modo depuración: si DEBUG !== "true", silenciamos los logs ruidosos.
-const DEBUG = process.env.DEBUG === "true";
-const debugLog = (...args) => { if (DEBUG) console.log(...args); };
-
-// 🛍️ Versión de la API de Shopify (configurable por env para no quedar obsoleta).
-const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2024-01";
 
 
 /* ==========================================================================
@@ -198,15 +130,12 @@ function normalizeQuery(query) {
 
 // Limpia texto HTML sucio que viene de Shopify
 function cleanText(text) {
-    if (!text) return "";
-    // 1. Reemplazamos <br> por saltos de línea reales para que la IA entienda la estructura
-    let clean = text.replace(/<br\s*\/?>/gi, "\n"); 
-    // 2. Quitamos el resto de etiquetas HTML
-    clean = clean.replace(/<[^>]*>?/gm, " ");
-    // 3. Quitamos espacios dobles
-    clean = clean.replace(/\s+/g, " ").trim();
-    // 🔥 SUBIMOS EL LÍMITE A 5000 (O lo quitamos directamente)
-    return clean.substring(0, 5000); 
+    if (!text) return "Sin información";
+    return text
+        .replace(/<[^>]*>?/gm, " ") // Quita etiquetas <div>, <p>...
+        .replace(/\s+/g, " ")       // Quita espacios dobles
+        .trim()
+        .substring(0, 600);         // Corta para no gastar muchos tokens
 }
 
 // Cálculo matemático para ver similitud entre vectores (Búsqueda Semántica)
@@ -217,27 +146,6 @@ function cosineSimilarity(a, b) {
 // Parsea JSON de forma segura
 function safeParse(value) {
     try { return JSON.parse(value); } catch { return value; }
-}
-
-// 👋 Detecta saludos / charla trivial para ahorrarnos 3 llamadas a OpenAI.
-// Conservador: solo corta si TODO el mensaje es un saludo corto sin intención de producto.
-const SMALLTALK_PATTERNS = [
-    /^hola+$/, /^buenas( tardes| noches| dias| días)?$/, /^hey$/, /^holi+$/,
-    /^gracias( muchas)?$/, /^muchas gracias$/, /^ok(ay)?$/, /^vale$/, /^genial$/,
-    /^perfecto$/, /^adios$/, /^adiós$/, /^hasta luego$/, /^buenos dias$/, /^buenos días$/
-];
-function isSmallTalk(text) {
-    const t = (text || "").toLowerCase().trim().replace(/[!¡.,…]+$/g, "").replace(/\s+/g, " ");
-    if (t.length === 0 || t.length > 25) return false;
-    // Si menciona algo que parece producto/pedido, NO es small talk
-    if (/\d{3,}|@|talla|precio|envio|envío|pedido|devol|cambio|stock|chaqueta|pantalon|comprar/.test(t)) return false;
-    return SMALLTALK_PATTERNS.some(re => re.test(t));
-}
-function smallTalkReply(text) {
-    const t = (text || "").toLowerCase();
-    if (/gracias/.test(t)) return "¡A ti! 🏔️ Si necesitas algo más (productos, tallas, envíos o tu pedido), aquí estoy.";
-    if (/adios|adiós|hasta luego/.test(t)) return "¡Hasta pronto! Que disfrutes la montaña. 🏔️";
-    return "¡Hola! 👋 ¿En qué puedo ayudarte? Puedo buscarte productos, resolver dudas de tallas, envíos o devoluciones, o consultar tu pedido.";
 }
 
 // Extractor robusto de JSON (para cuando GPT mete texto antes o después)
@@ -257,13 +165,9 @@ function extractJSON(str) {
 
 // 🔥 FUNCIÓN MEJORADA: Incluye sistema de reintentos (Retries)
 async function fetchGraphQL(query, variables = {}, retries = 3) {
-    const url = `https://${SHOPIFY_STORE}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
+    const url = `https://${SHOPIFY_STORE}/admin/api/2024-01/graphql.json`;
     
     for (let i = 0; i < retries; i++) {
-        // 🔥 FIX: node-fetch v3 ignora la opción 'timeout'. Usamos AbortController
-        // para cortar de verdad las peticiones que se cuelgan (10s máximo).
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
         try {
             const res = await fetch(url, {
                 method: "POST",
@@ -272,9 +176,9 @@ async function fetchGraphQL(query, variables = {}, retries = 3) {
                     "Content-Type": "application/json",
                 },
                 body: JSON.stringify({ query, variables }),
-                signal: controller.signal // 10 segundos máximo por petición
+                timeout: 10000 // 10 segundos máximo por petición
             });
-
+            
             if (!res.ok) {
                 throw new Error(`Shopify Error ${res.status}: ${res.statusText}`);
             }
@@ -294,8 +198,6 @@ async function fetchGraphQL(query, variables = {}, retries = 3) {
             const waitTime = 1000 * (i + 1); // 1s, 2s, 3s...
             console.warn(`⚠️ Error red (${error.message}). Reintentando en ${waitTime}ms... (${i + 1}/${retries})`);
             await new Promise(r => setTimeout(r, waitTime));
-        } finally {
-            clearTimeout(timeoutId); // Evitamos fugas de timers
         }
     }
 }
@@ -327,7 +229,7 @@ async function getAllProducts() {
                 }
               }
             }
-            metafields(first: 40) { edges { node { namespace key value } } }
+            metafields(first: 20) { edges { node { namespace key value } } }
           }
         }
       }
@@ -389,33 +291,14 @@ async function getAllProducts() {
 }
 
 // ⚡ LIVE STOCK CHECK: Actualiza el stock de productos específicos en tiempo real
-// 🗃️ CACHE DE STOCK EN VIVO (TTL corto)
-// Evita preguntar a Shopify por el mismo producto en cada mensaje.
-// id -> { variants (solo datos de stock), ts }
-const liveStockCache = new Map();
-const LIVE_STOCK_TTL_MS = Number(process.env.LIVE_STOCK_TTL_MS) || 60 * 1000; // 60s por defecto
-
 // 🔥 FIX CRÍTICO: Mantiene precios e imágenes si el check rápido no los trae
 async function getLiveStockForProducts(products) {
     if (!products || products.length === 0) return products;
 
-    const now = Date.now();
+    console.log("⚡ Actualizando stock en tiempo real para", products.length, "productos...");
 
-    // Separamos lo que tenemos fresco en cache de lo que hay que pedir a Shopify
-    const staleProducts = products.filter(p => {
-        const cached = liveStockCache.get(String(p.id));
-        return !cached || (now - cached.ts) > LIVE_STOCK_TTL_MS;
-    });
-
-    debugLog(`⚡ Stock: ${products.length} pedidos, ${staleProducts.length} a Shopify (resto cache).`);
-
-    // Si TODO está fresco en cache, no llamamos a Shopify
-    if (staleProducts.length === 0) {
-        return products.map(p => applyCachedStock(p));
-    }
-
-    // Preparamos los IDs SOLO de los productos caducados
-    const productIds = staleProducts.map(p => `gid://shopify/Product/${p.id}`);
+    // Preparamos los IDs para Shopify
+    const productIds = products.map(p => `gid://shopify/Product/${p.id}`);
 
     const query = `
     query getNodes($ids: [ID!]!) {
@@ -440,59 +323,48 @@ async function getLiveStockForProducts(products) {
 
     try {
         const data = await fetchGraphQL(query, { ids: productIds });
+        
+        if (!data || !data.nodes) return products;
 
-        // Guardamos en cache los nodos frescos que sí han llegado
-        if (data && data.nodes) {
-            for (const freshNode of data.nodes) {
-                if (!freshNode) continue;
-                const id = freshNode.id.split("/").pop();
-                const stockVariants = freshNode.variants.edges.map(v => ({
-                    id: v.node.id.split("/").pop(),
+        // Actualizamos los productos en memoria con los datos frescos
+        return products.map(p => {
+            // Buscamos el nodo fresco correspondiente
+            const freshNode = data.nodes.find(n => n && n.id.endsWith(`/${p.id}`));
+            
+            if (!freshNode) return p; // Si falla, devolvemos el viejo
+
+            // Mapeamos las nuevas variantes preservando datos antiguos importantes (Precio/Img)
+            const freshVariants = freshNode.variants.edges.map(v => {
+                const variantId = v.node.id.split("/").pop();
+                // Buscamos la variante antigua para recuperar precio e imagen si faltan
+                const oldVariant = p.variants.find(oldV => oldV.id === variantId);
+
+                return {
+                    id: variantId,
                     title: v.node.title,
+                    // Mantenemos precio e imagen del índice (son pesados y cambian poco)
+                    price: oldVariant?.price || "Consultar",
+                    image: oldVariant?.image || "",
+                    // DATOS CLAVE ACTUALIZADOS:
                     inventoryQuantity: v.node.inventoryQuantity,
                     availableForSale: v.node.availableForSale,
                     selectedOptions: v.node.selectedOptions
-                }));
-                liveStockCache.set(String(id), { variants: stockVariants, ts: Date.now() });
-            }
-        }
+                };
+            });
 
-        // Devolvemos TODOS los productos aplicando el stock cacheado (recién o no)
-        return products.map(p => applyCachedStock(p));
+            return { ...p, variants: freshVariants };
+        });
 
     } catch (error) {
         console.error("❌ Error actualizando stock live:", error);
-        return products; // En caso de error, usamos el índice tal cual
+        return products; // En caso de error, usamos el caché
     }
-}
-
-// Aplica el stock cacheado a un producto, conservando precio e imagen del índice.
-function applyCachedStock(product) {
-    const cached = liveStockCache.get(String(product.id));
-    if (!cached) return product; // Sin datos frescos: devolvemos el producto tal cual
-
-    const mergedVariants = cached.variants.map(sv => {
-        const oldVariant = product.variants.find(oldV => oldV.id === sv.id);
-        return {
-            id: sv.id,
-            title: sv.title,
-            // Precio e imagen vienen del índice (pesan y cambian poco)
-            price: oldVariant?.price || "Consultar",
-            image: oldVariant?.image || "",
-            // Datos de stock frescos desde cache
-            inventoryQuantity: sv.inventoryQuantity,
-            availableForSale: sv.availableForSale,
-            selectedOptions: sv.selectedOptions
-        };
-    });
-
-    return { ...product, variants: mergedVariants };
 }
 
 // 🚚 RASTREADOR DE PEDIDOS: Busca estado, tracking y transportista
 async function getOrderStatus(orderId, userEmail) {
     const cleanId = orderId.replace("#", "").trim();
-    debugLog(`🔍 Consultando Shopify para ID: ${cleanId}, Email user: ${userEmail}`);
+    console.log(`🔍 Consultando Shopify para ID: ${cleanId}, Email user: ${userEmail}`);
 
     const query = `
     query getOrder($query: String!) {
@@ -583,170 +455,20 @@ function buildAIText(product) {
     return `TIPO: ${product.productType}\nTITULO: ${product.title}\nDESC: ${product.description}\nTAGS: ${product.tags.join(", ")}`;
 }
 
-// Tabla de Supabase donde persistimos el índice de embeddings.
-// (Requiere crear la tabla con el SQL incluido en SUPABASE_SETUP.sql)
-const AI_INDEX_TABLE = "ai_index";
-
-// 📥 Intenta cargar el índice de productos (con embeddings) desde Supabase.
-// Devuelve un array; vacío si no hay nada o falla.
-async function loadIndexFromSupabase() {
-    try {
-        // Paginamos por si hay muchos productos (Supabase limita ~1000 por query).
-        let all = [];
-        let from = 0;
-        const page = 1000;
-        while (true) {
-            const { data, error } = await supabase
-                .from(AI_INDEX_TABLE)
-                .select("payload")
-                .range(from, from + page - 1);
-            if (error) { console.error("⚠️ Error leyendo índice de Supabase:", error.message); break; }
-            if (!data || data.length === 0) break;
-            all = all.concat(data.map(r => r.payload));
-            if (data.length < page) break;
-            from += page;
-        }
-        return all;
-    } catch (e) {
-        console.error("⚠️ Excepción leyendo índice de Supabase:", e.message);
-        return [];
-    }
-}
-
-// 💾 Guarda el índice de productos en Supabase (una fila por producto).
-async function saveIndexToSupabase(index) {
-    if (!index || index.length === 0) return;
-    try {
-        const rows = index.map(p => ({ id: String(p.id), payload: p, updated_at: new Date() }));
-        // Subimos en lotes para no exceder límites de tamaño de petición.
-        const batchSize = 100;
-        for (let i = 0; i < rows.length; i += batchSize) {
-            const batch = rows.slice(i, i + batchSize);
-            const { error } = await supabase.from(AI_INDEX_TABLE).upsert(batch, { onConflict: "id" });
-            if (error) { console.error("⚠️ Error guardando índice en Supabase:", error.message); return; }
-        }
-        console.log(`💾 Índice persistido en Supabase (${rows.length} productos).`);
-    } catch (e) {
-        console.error("⚠️ Excepción guardando índice en Supabase:", e.message);
-    }
-}
-
-// Hash del texto que vectorizamos: si no cambia, reutilizamos el embedding.
-function contentHash(product) {
-    return crypto.createHash("md5").update(buildAIText(product)).digest("hex");
-}
-
-// Borra de Supabase los productos que ya no existen en Shopify.
-async function deleteFromSupabase(ids) {
-    if (!ids || ids.length === 0) return;
-    try {
-        const { error } = await supabase.from(AI_INDEX_TABLE).delete().in("id", ids.map(String));
-        if (error) console.error("⚠️ Error borrando productos de Supabase:", error.message);
-    } catch (e) {
-        console.error("⚠️ Excepción borrando de Supabase:", e.message);
-    }
-}
-
-// 🔄 SINCRONIZACIÓN INCREMENTAL DEL CATÁLOGO
-// Descarga la lista de Shopify y SOLO vectoriza lo nuevo o lo que ha cambiado.
-// Reutiliza los embeddings existentes para lo que no ha cambiado (barato).
-// Maneja también productos borrados. Pensado para ejecutarse periódicamente.
-let isSyncing = false;
-async function syncCatalog() {
-    if (isSyncing) { debugLog("↩️ Sync ya en curso, se omite."); return; }
-    isSyncing = true;
-    try {
-        const products = await getAllProducts();
-        if (!products || products.length === 0) {
-            console.warn("⚠️ Sync: Shopify devolvió 0 productos, no toco el índice.");
-            return;
-        }
-
-        // Índice actual por id para reutilizar embeddings.
-        const currentById = new Map(aiIndex.map(p => [String(p.id), p]));
-
-        const newIndex = [];
-        const toUpsert = [];
-        let embedded = 0;
-
-        for (const p of products) {
-            const id = String(p.id);
-            const existing = currentById.get(id);
-            const hash = contentHash(p);
-
-            if (existing && existing.embedding && existing._hash === hash) {
-                // Sin cambios: reutilizamos el embedding existente.
-                newIndex.push({ ...p, embedding: existing.embedding, _hash: hash });
-            } else if (existing && existing.embedding && !existing._hash && contentHash(existing) === hash) {
-                // Entrada antigua sin _hash pero con el mismo contenido: reutilizamos.
-                newIndex.push({ ...p, embedding: existing.embedding, _hash: hash });
-            } else {
-                // Nuevo o cambiado: re-vectorizamos.
-                const emb = await openai.embeddings.create({ model: "text-embedding-3-large", input: buildAIText(p) });
-                const entry = { ...p, embedding: emb.data[0].embedding, _hash: hash };
-                newIndex.push(entry);
-                toUpsert.push(entry);
-                embedded++;
-            }
-        }
-
-        // Detectamos borrados: ids que estaban antes y ya no vienen de Shopify.
-        const freshIds = new Set(products.map(p => String(p.id)));
-        const removedIds = [...currentById.keys()].filter(id => !freshIds.has(id));
-
-        // Aplicamos cambios en memoria
-        aiIndex = newIndex;
-
-        // Persistimos solo lo necesario
-        if (toUpsert.length > 0) await saveIndexToSupabase(toUpsert);
-        if (removedIds.length > 0) await deleteFromSupabase(removedIds);
-
-        // Refrescamos la caché local
-        try { fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex)); } catch (e) { /* fs efímero */ }
-
-        if (embedded > 0 || removedIds.length > 0) {
-            console.log(`🔄 Sync: ${embedded} nuevos/cambiados vectorizados, ${removedIds.length} borrados. Total: ${aiIndex.length}.`);
-        } else {
-            debugLog(`🔄 Sync: sin cambios (${aiIndex.length} productos).`);
-        }
-    } catch (error) {
-        console.error("❌ Error en syncCatalog:", error.message);
-    } finally {
-        isSyncing = false;
-    }
-}
-
 // Carga los productos al iniciar el servidor (Caché -> O descarga nueva)
-// force=true ignora las cachés (local y Supabase) y reconstruye desde Shopify.
-async function loadIndexes(force = false) {
-    if (force) { aiIndex = []; console.log("♻️ Reindexación forzada: ignorando cachés."); }
-
-    // 1. Intentamos cargar de caché local primero para arrancar rápido
-    if (!force && fs.existsSync(INDEX_FILE)) {
+async function loadIndexes() {
+    // 1. Intentamos cargar de caché primero para arrancar rápido
+    if (fs.existsSync(INDEX_FILE)) {
         console.log("📦 Cargando productos desde caché (arranque rápido)...");
         try {
             aiIndex = JSON.parse(fs.readFileSync(INDEX_FILE, "utf8"));
-        } catch (e) {
+        } catch (e) { 
             console.error("⚠️ Caché corrupta, se ignorará.");
-            aiIndex = [];
+            aiIndex = []; 
         }
     }
 
-    // 1.5 Si la caché local está vacía (típico en Render tras un reinicio),
-    //     intentamos cargar el índice ya vectorizado desde Supabase. Así NO
-    //     volvemos a llamar a OpenAI para re-embeddear todo el catálogo.
-    if (!force && aiIndex.length === 0) {
-        console.log("☁️ Caché local vacía: intentando cargar índice desde Supabase...");
-        const fromDb = await loadIndexFromSupabase();
-        if (fromDb.length > 0) {
-            aiIndex = fromDb;
-            console.log(`✅ Índice cargado desde Supabase: ${aiIndex.length} productos (sin re-vectorizar).`);
-            // Reescribimos la caché local para acelerar el siguiente arranque.
-            try { fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex)); } catch (e) { /* fs efímero */ }
-        }
-    }
-
-    // 2. Si SIGUE sin haber datos, descargamos de Shopify y vectorizamos.
+    // 2. Si no hay datos (o queremos refrescar), descargamos de Shopify
     if (aiIndex.length === 0) {
         console.log("🤖 Indexando productos en Shopify (esto puede tardar)...");
         try {
@@ -761,14 +483,11 @@ async function loadIndexes(force = false) {
                     tempIndex.push({ ...p, embedding: emb.data[0].embedding });
                 }
                 aiIndex = tempIndex; // Actualizamos la memoria
-
-                try {
-                    fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex));
+                
+                try { 
+                    fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex)); 
                     console.log("💾 Índice guardado en disco.");
                 } catch (e) { console.error("⚠️ No se pudo guardar caché en disco (read-only system?)"); }
-
-                // 🔥 Persistimos también en Supabase para no re-vectorizar en cada arranque.
-                await saveIndexToSupabase(aiIndex);
             } else {
                 console.warn("⚠️ Advertencia: Shopify devolvió 0 productos.");
             }
@@ -796,7 +515,6 @@ async function loadIndexes(force = false) {
 
 // 🧹 REFINAMIENTO: Traduce "quiero unos pantalones" a una query técnica
 async function refineQuery(userQuery, history) {
-  try {
     const response = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: [
@@ -821,11 +539,6 @@ async function refineQuery(userQuery, history) {
         temperature: 0
     });
     return response.choices[0].message.content;
-  } catch (error) {
-    // Si OpenAI falla aquí, no tumbamos el endpoint: seguimos con la query original.
-    console.error("⚠️ refineQuery falló, uso la query original:", error.message);
-    return userQuery;
-  }
 }
 
 // 🛡️ FORMATO DE STOCK SEGURO: Agrupa por color y oculta cantidades exactas
@@ -878,37 +591,10 @@ function formatStockForAI(variants) {
 /* ==========================================================================
    🚪 ENDPOINT PRINCIPAL (/api/ai/search)
    ========================================================================== */
-app.post("/api/ai/search", rateLimiter, async (req, res) => {
+app.post("/api/ai/search", async (req, res) => {
     // 🔥🔥 AÑADIDO: 'context_handle' para saber dónde está el usuario
     const { q, history, visible_ids, session_id, context_handle } = req.body;
-    if (!q || typeof q !== "string" || !q.trim()) {
-        return res.status(400).json({ error: "Falta query" });
-    }
-    // 🛡️ Límite de longitud: evita prompt injection masivo y costes desbocados
-    if (q.length > 1000) {
-        return res.status(400).json({ error: "La consulta es demasiado larga." });
-    }
-
-    // 👋 ATAJO SMALL TALK: si es solo un saludo/agradecimiento, respondemos sin
-    // gastar las 3 llamadas a OpenAI (refine + embedding + chat). Solo si no hay
-    // producto en pantalla (en ese caso sí queremos el contexto del producto).
-    if (!context_handle && isSmallTalk(q)) {
-        const reply = smallTalkReply(q);
-        // Guardamos la interacción en Supabase sin bloquear la respuesta
-        const sid = session_id || "anonimo";
-        const turn = [
-            { role: "user", content: q, timestamp: new Date().toISOString() },
-            { role: "assistant", content: reply, timestamp: new Date().toISOString() }
-        ];
-        supabase.from('chat_sessions').upsert({
-            session_id: sid,
-            conversation: [...(history || []), ...turn],
-            category: "GENERAL",
-            updated_at: new Date()
-        }, { onConflict: 'session_id' }).then(({ error }) => { if (error) console.error("❌ Error Supabase (smalltalk):", error.message); });
-
-        return res.json({ products: [], text: reply, isSizeContext: false });
-    }
+    if (!q) return res.status(400).json({ error: "Falta query" });
 
     try {
         // ---------------------------------------------------------
@@ -991,18 +677,12 @@ app.post("/api/ai/search", rateLimiter, async (req, res) => {
                 const titleLower = p.title.toLowerCase();
                 const queryLower = optimizedQuery.toLowerCase().trim();
 
-                // 🔥 CAMBIO 1: BOOST ACUMULATIVO
-                // En lugar de ".some()" (alguna), usamos un bucle.
-                // Si la búsqueda tiene 2 palabras clave, sumamos puntos por CADA una.
-                const coreKeywords = queryLower.split(/\s+/).filter(w => w.length > 3);
-                
-                coreKeywords.forEach(kw => {
-                    if (titleLower.includes(kw)) {
-                        score += 0.5; // Damos 0.5 puntos por CADA coincidencia de palabra
-                    }
-                });
+                // Boost por coincidencia de palabras clave
+                const coreKeywords = queryLower.split(" ").filter(w => w.length > 3);
+                const matchesCore = coreKeywords.some(kw => titleLower.includes(kw));
+                if (matchesCore) score += 0.3;
 
-                // Penalización/Boost por versión (Esto lo dejamos igual, está bien)
+                // Penalización/Boost por versión (V2, V3...)
                 if (targetVersion) {
                     if (titleLower.includes(targetVersion)) {
                         score += 0.4;
@@ -1013,7 +693,7 @@ app.post("/api/ai/search", rateLimiter, async (req, res) => {
                 return { ...p, score };
             })
             .sort((a, b) => b.score - a.score)
-            .slice(0, 20); // 🔥 CAMBIO 2: Subimos de 8 a 20 para que quepan variantes de ambos modelos
+            .slice(0, 8); // Top 8 candidatos
 
         // Buscamos FAQs similares
         const faqResults = faqIndex
@@ -1044,34 +724,19 @@ app.post("/api/ai/search", rateLimiter, async (req, res) => {
 
         // Generamos el texto que leerá la IA
         const productsContext = finalCandidatesList.map(p => {
-            const isViewing = productOnScreen && String(p.id) === String(productOnScreen.id) ? " (🔥 VIENDO AHORA)" : "";
             const colorOption = p.options ? p.options.find(o => o.name.match(/color|cor/i)) : null;
             const officialColors = colorOption ? colorOption.values.join(", ") : "Único";
             const cleanDescription = cleanText(p.body_html || p.description);
             const stockText = formatStockForAI(p.variants); // Generado con datos frescos
-            let metaInfo = "";
-             if (p.metafields) {
-                 metaInfo = Object.entries(p.metafields)
-                     .map(([key, val]) => {
-                         // Si el valor es una lista o JSON, lo convertimos a texto
-                         const valStr = typeof val === 'object' ? JSON.stringify(val) : String(val);
-                         // Limpiamos HTML si lo hubiera
-                         return `${key}: ${cleanText(valStr)}`;
-                     })
-                     .join(" | ");
-             }
 
             // ETIQUETA VISUAL PARA LA IA
             let tag = "";
             if (productOnScreen && String(p.id) === String(productOnScreen.id)) tag = " (🔥 USUARIO VIENDO AHORA)";
             else if (visible_ids && visible_ids.map(String).includes(String(p.id))) tag = " (EN PANTALLA)";
 
-            return `PRODUCTO${isViewing}:
+            return `PRODUCTO${tag}:
             - ID: ${p.id}
             - Título: ${p.title}
-            - Tags:${p.tags.join(",")}
-            - Desc:${cleanText(p.body_html)}
-            - InfoExtra:${metaInfo}
             - Precio: ${p.price} €
             - Colores: ${officialColors}
             - Stock: ${stockText}`;
@@ -1101,24 +766,9 @@ app.post("/api/ai/search", rateLimiter, async (req, res) => {
                     - ⚠️ OBLIGATORIO: Si el cliente está viendo un producto, DEBES INCLUIRLO SIEMPRE en el array "products" de tu respuesta JSON, incluso si solo estás dando información de tallas o envíos.
                     - El panel lateral depende de que tú envíes ese producto en el JSON. No falles.
 
-                    🏷️ CATEGORÍAS DISPONIBLES (Para el campo 'category'):
-                    - TALLAJE: Tallas, medidas, guías.
-                    - PEDIDOS: Envíos, plazos, costes.
-                    - DEVOLUCION/CAMBIO: Devoluciones, cambios.
-                    - PRODUCTO: Info de producto, stock, características.
-                    - TIENDA: Tiendas físicas.
-                    - HUMANO: Piden hablar con humano.
-                    - GENERAL: Saludo, otros.
-
                     ⛔ REGLAS DE SEGURIDAD (IMPORTANTE):
                     1. COMPETENCIA Y CANALES: Decathlon, Amazon... son partners. No mientas. Recomienda comprar en web oficial.
                     2. CONOCIMIENTO: Usa "PRODUCTOS DISPONIBLES". Si no sabes, dilo.
-                    3. REDES SOCIALES: instagram @izasofficial, tiktok @izas_official, facebook @IzasOutdoor, pinterest @IzasOutdoor. No tenemos inguna otra red social. Si te piden el enlace de cualquiera de las tres, dáselo correctamente formado, incluyendo el https de forma que se pueda acceder a él.
-
-                    📍 REGLA ESPECIAL TIENDAS:
-                    - Si preguntan por tiendas físicas, ubicación o disponibilidad de stock en tienda física:
-                    - ⚠️ ACLARACIÓN VITAL: Debes dejar muy claro que actualmente NO es posible consultar el stock de las tiendas físicas a través de la web. Para saber si una prenda está en una tienda, el cliente debe llamar o visitar la tienda directamente.
-                    - Para que busquen su tienda más cercana, dales este enlace EXACTAMENTE así, en texto plano (prohibido usar formato Markdown [texto](url) o etiquetas HTML <a>): https://www.izas-outdoor.com/pages/localizador-de-tiendas
 
                     3. GESTIÓN DE STOCK Y CONTEXTO VISUAL (¡MUY IMPORTANTE!):
                         - CRUCIAL: LEE EL CAMPO 'Stock:' DE CADA PRODUCTO.
@@ -1164,7 +814,7 @@ app.post("/api/ai/search", rateLimiter, async (req, res) => {
         // 4. 🖼️ PROCESADO FINAL BLINDADO (SANITIZACIÓN)
         // ---------------------------------------------------------
         const rawContent = completion.choices[0].message.content;
-        debugLog("RAW OPENAI RESPONSE:", rawContent);
+        console.log("RAW OPENAI RESPONSE:", rawContent);
 
         let aiContent;
         try {
@@ -1272,20 +922,9 @@ app.post("/api/ai/search", rateLimiter, async (req, res) => {
 });
 
 /* ==========================================================================
-   👋 ENDPOINT DE INICIO (/api/chat/init)
-   ==========================================================================
-   El frontend llama a este endpoint al abrir el chat por primera vez.
-   Devuelve el saludo inicial y registra la apertura de sesión en Supabase. */
-const WELCOME_MESSAGE = "¡Hola! Soy el asistente experto de Izas. 🏔️ ¿En qué puedo ayudarte? Puedo buscarte productos, resolver dudas de tallas, envíos o devoluciones, o consultar el estado de tu pedido.";
-
-app.post("/api/chat/init", rateLimiter, async (req, res) => {
-    res.json({ text: WELCOME_MESSAGE });
-});
-
-/* ==========================================================================
    📝 ENDPOINT PARA GUARDAR LOGS MANUALES (Feedback, Botones, etc.)
    ========================================================================== */
-app.post("/api/chat/log", rateLimiter, async (req, res) => {
+app.post("/api/chat/log", async (req, res) => {
     const { session_id, role, content } = req.body;
 
     if (!session_id || !role || !content) return res.status(400).json({ error: "Faltan datos" });
@@ -1319,7 +958,7 @@ app.post("/api/chat/log", rateLimiter, async (req, res) => {
 
         if (error) throw error;
 
-        debugLog(`💾 Log manual guardado para sesión ${session_id}: ${content}`);
+        console.log(`💾 Log manual guardado para sesión ${session_id}: ${content}`);
         res.json({ success: true });
 
     } catch (error) {
@@ -1329,65 +968,11 @@ app.post("/api/chat/log", rateLimiter, async (req, res) => {
 });
 
 /* ==========================================================================
-   ❤️ HEALTHCHECK (/health)
-   ==========================================================================
-   Útil para que Render (u otro monitor) sepa si el servicio está vivo y si
-   el índice de productos ya se ha cargado en memoria. */
-app.get("/health", (req, res) => {
-    res.json({
-        status: "ok",
-        productsIndexed: aiIndex.length,
-        faqsIndexed: faqIndex.length,
-        uptimeSeconds: Math.round(process.uptime())
-    });
-});
-
-/* ==========================================================================
-   ♻️ REINDEXAR CATÁLOGO (/api/admin/reindex)
-   ==========================================================================
-   Reconstruye el índice desde Shopify (re-vectoriza) y lo persiste en Supabase.
-   Úsalo cuando cambies productos. Protegido con ADMIN_TOKEN. */
-app.post("/api/admin/reindex", async (req, res) => {
-    const token = req.headers["x-admin-token"];
-    if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN) {
-        return res.status(401).json({ error: "No autorizado" });
-    }
-    // Lanzamos en segundo plano para no dejar la petición colgada mucho tiempo.
-    res.json({ status: "reindexando", message: "La reindexación se está ejecutando en segundo plano." });
-    loadIndexes(true)
-        .then(() => console.log("✅ Reindexación manual completada."))
-        .catch(err => console.error("❌ Error en reindexación manual:", err));
-});
-
-/* ==========================================================================
    🚀 INICIO DEL SERVIDOR
    ========================================================================== */
-// Cada cuánto sincronizamos el catálogo automáticamente (por defecto: 6 horas).
-const SYNC_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS) || 6 * 60 * 60 * 1000;
-
 app.listen(PORT, async () => {
     console.log(`🚀 Server en http://localhost:${PORT}`);
+    // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
+    loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
 
-    // 1. Carga inicial del índice (caché local -> Supabase -> Shopify) sin bloquear el arranque.
-    loadIndexes()
-        .then(() => {
-            // 2. Tras cargar, hacemos una sync incremental a los 2 min para captar
-            //    productos nuevos/cambiados desde la última vez (barato: solo lo que cambió).
-            setTimeout(() => { syncCatalog().catch(e => console.error("Sync inicial:", e.message)); }, 2 * 60 * 1000);
-        })
-        .catch(err => console.error("⚠️ Error en carga inicial:", err));
-
-    // 3. Sync incremental periódica automática (sin intervención manual).
-    setInterval(() => { syncCatalog().catch(e => console.error("Sync periódica:", e.message)); }, SYNC_INTERVAL_MS);
-    console.log(`🔄 Sincronización automática de catálogo cada ${Math.round(SYNC_INTERVAL_MS / 60000)} min.`);
 });
-
-
-
-
-
-
-
-
-
-
