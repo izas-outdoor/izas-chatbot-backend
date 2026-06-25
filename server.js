@@ -599,11 +599,20 @@ app.post("/api/ai/search", async (req, res) => {
     // 🎖️ IZAS MEMBERS: datos del socio si el cliente tiene sesión iniciada en Shopify.
     // Vienen ya resueltos por el frontend desde /apps/izas-members/perfil (App Proxy firmado),
     // así que aquí solo los formateamos para el prompt, sin volver a consultar nada.
-    let memberInfo = "N/A (el cliente no tiene sesión iniciada o no es socio Izas Members)";
-    if (member_context && (member_context.nivel || member_context.puntos != null)) {
-        memberInfo = `Nivel: ${member_context.nivel || "N/A"} | Puntos disponibles: ${member_context.puntos ?? "N/A"} | Equivalente en descuento: ${member_context.saldoDisponible ?? "N/A"}€`;
-    }
+    const TIER_BENEFITS = {
+        BRONCE: "Envío gratis desde 59,99€. Regalo de cumpleaños: 100 puntos.",
+        PLATA: "Envío gratis desde 49,99€. +10% de puntos en compras de 200€ o más. Acceso anticipado a colecciones. Regalo de cumpleaños: 150 puntos.",
+        ORO: "Envío siempre gratis. +20% de puntos en compras de 200€ o más. Acceso anticipado a colecciones. Regalo de cumpleaños: 200 puntos + cupón 10% (7 días)."
+    };
     const loginLink = login_url || "https://www.izas-outdoor.com/account/login";
+
+    // 🔒 El enlace de login SOLO se incluye en el prompt cuando realmente no hay sesión/socio.
+    // Así el modelo no tiene "a mano" el enlace para ofrecerlo cuando ya tiene datos reales.
+    let memberInfo = `N/A (el cliente no tiene sesión iniciada o no es socio Izas Members). Enlace de inicio de sesión a ofrecer: ${loginLink}`;
+    if (member_context && (member_context.nivel || member_context.puntos != null)) {
+        const nivelKey = (member_context.nivel || "BRONCE").toUpperCase();
+        memberInfo = `Nivel: ${nivelKey} | Puntos disponibles: ${member_context.puntos ?? "N/A"} | Equivalente en descuento: ${member_context.saldoDisponible ?? "N/A"}€ | Ventajas de su nivel: ${TIER_BENEFITS[nivelKey] || "N/A"}`;
+    }
 
     try {
         // ---------------------------------------------------------
@@ -809,10 +818,11 @@ app.post("/api/ai/search", async (req, res) => {
                         - ✅ REVISA TODOS los productos listados abajo.
                         - Si el producto 1 no tiene, pero el producto 2 sí, responde: "Sí, la tengo disponible en talla XXL en color [Color del Producto 2]".
 
-                    7. 🎖️ PUNTOS Y NIVEL DE IZAS MEMBERS (CLIENTE ACTUAL):
-                        - Si el usuario pregunta por SUS puntos, nivel o saldo de fidelización, usa EXCLUSIVAMENTE el bloque "DATOS SOCIO IZAS MEMBERS" de abajo. No inventes ni calcules cifras.
-                        - Si dice "N/A": explica brevemente que para ver sus puntos necesita iniciar sesión, e incluye el enlace EXACTO que tienes en "ENLACE DE INICIO DE SESIÓN" en formato de link: [Iniciar sesión](ENLACE). Si además no es socio, menciona que puede registrarse en Izas Members. No reveles a qué se debe el N/A técnicamente.
-                        - Para dudas generales sobre cómo funciona el programa (cómo ganar puntos, canjear, niveles, etc.) usa las FAQs, no este bloque.
+                    7. 🎖️ PUNTOS, NIVEL Y VENTAJAS DE IZAS MEMBERS (CLIENTE ACTUAL):
+                        - Si el usuario pregunta por SUS puntos, nivel, saldo o "qué ventajas/beneficios tengo", usa EXCLUSIVAMENTE el bloque "DATOS SOCIO IZAS MEMBERS" de abajo (incluye ya las ventajas de su nivel concreto). No inventes ni calcules cifras, y no menciones niveles que no sean el suyo.
+                        - Si ese bloque empieza por "N/A": el cliente no tiene sesión iniciada o no es socio. Explica brevemente que necesita iniciar sesión, e incluye el enlace que viene ahí mismo en formato de link: [Iniciar sesión](enlace). No reveles el motivo técnico del N/A.
+                        - Si el bloque SÍ tiene Nivel/Puntos reales, NUNCA sugieras iniciar sesión ni canjees dudas sobre si la sesión está iniciada: ya lo está, responde directamente con sus datos.
+                        - Para dudas generales sobre cómo funciona el programa (cómo ganar puntos, canjear, requisitos de cada nivel, etc.) usa las FAQs, no este bloque.
 
                     8. 📦 CONSULTA DE PEDIDOS:
                         - SÍ PUEDES consultar pedidos concretos: nunca digas que "no tienes acceso" a los pedidos.
@@ -824,7 +834,6 @@ app.post("/api/ai/search", async (req, res) => {
                     ALERTA SEGURIDAD: ${securityWarning || "Ninguna"}
                     DATOS PEDIDO LIVE: ${orderData || "N/A"}
                     DATOS SOCIO IZAS MEMBERS: ${memberInfo}
-                    ENLACE DE INICIO DE SESIÓN: ${loginLink}
                     DATOS DE MARCA: ${BRAND_INFO}
                     FAQs: ${faqResults.map(f => `P:${f.question} R:${f.answer}`).join("\n")}
                     PRODUCTOS DISPONIBLES: ${productsContext}
