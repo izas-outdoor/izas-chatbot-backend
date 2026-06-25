@@ -593,7 +593,7 @@ function formatStockForAI(variants) {
    ========================================================================== */
 app.post("/api/ai/search", async (req, res) => {
     // 🔥🔥 AÑADIDO: 'context_handle' para saber dónde está el usuario
-    const { q, history, visible_ids, session_id, context_handle, member_context } = req.body;
+    const { q, history, visible_ids, session_id, context_handle, member_context, customer_email, login_url } = req.body;
     if (!q) return res.status(400).json({ error: "Falta query" });
 
     // 🎖️ IZAS MEMBERS: datos del socio si el cliente tiene sesión iniciada en Shopify.
@@ -603,6 +603,7 @@ app.post("/api/ai/search", async (req, res) => {
     if (member_context && (member_context.nivel || member_context.puntos != null)) {
         memberInfo = `Nivel: ${member_context.nivel || "N/A"} | Puntos disponibles: ${member_context.puntos ?? "N/A"} | Equivalente en descuento: ${member_context.saldoDisponible ?? "N/A"}€`;
     }
+    const loginLink = login_url || "https://www.izas-outdoor.com/account/login";
 
     try {
         // ---------------------------------------------------------
@@ -621,6 +622,12 @@ app.post("/api/ai/search", async (req, res) => {
 
         if (emailMatch && emailMatch[0].includes("izas-outdoor.com")) {
             emailMatch = null;
+        }
+
+        // 🔐 Si el cliente tiene sesión iniciada en Shopify, usamos SIEMPRE su email verificado
+        // (más seguro que confiar en uno que escriba el usuario, y evita tener que pedírselo).
+        if (customer_email) {
+            emailMatch = [customer_email];
         }
 
         let orderData = null;
@@ -804,13 +811,20 @@ app.post("/api/ai/search", async (req, res) => {
 
                     7. 🎖️ PUNTOS Y NIVEL DE IZAS MEMBERS (CLIENTE ACTUAL):
                         - Si el usuario pregunta por SUS puntos, nivel o saldo de fidelización, usa EXCLUSIVAMENTE el bloque "DATOS SOCIO IZAS MEMBERS" de abajo. No inventes ni calcules cifras.
-                        - Si dice "N/A": explica que para ver sus puntos necesita tener la sesión iniciada en la tienda, y si no es socio, que puede registrarse en Izas Members. No reveles a qué se debe el N/A técnicamente.
+                        - Si dice "N/A": explica brevemente que para ver sus puntos necesita iniciar sesión, e incluye el enlace EXACTO que tienes en "ENLACE DE INICIO DE SESIÓN" en formato de link: [Iniciar sesión](ENLACE). Si además no es socio, menciona que puede registrarse en Izas Members. No reveles a qué se debe el N/A técnicamente.
                         - Para dudas generales sobre cómo funciona el programa (cómo ganar puntos, canjear, niveles, etc.) usa las FAQs, no este bloque.
+
+                    8. 📦 CONSULTA DE PEDIDOS:
+                        - SÍ PUEDES consultar pedidos concretos: nunca digas que "no tienes acceso" a los pedidos.
+                        - Si el usuario pregunta por sus pedidos en general (sin dar número) y "DATOS PEDIDO LIVE" es "N/A", pídele el número de pedido para buscarlo.
+                        - Si "ALERTA SEGURIDAD" es "FALTA_EMAIL", pide el email de la compra. Si es "FALTA_PEDIDO_ID", pide el número de pedido. Si no hay alerta y falta el número, simplemente pídelo.
+                        - Solo si tras pedir el número de pedido el cliente no puede dártelo o el sistema no lo encuentra, deriva a info@izas-outdoor.com.
 
                     --- DATOS ---
                     ALERTA SEGURIDAD: ${securityWarning || "Ninguna"}
                     DATOS PEDIDO LIVE: ${orderData || "N/A"}
                     DATOS SOCIO IZAS MEMBERS: ${memberInfo}
+                    ENLACE DE INICIO DE SESIÓN: ${loginLink}
                     DATOS DE MARCA: ${BRAND_INFO}
                     FAQs: ${faqResults.map(f => `P:${f.question} R:${f.answer}`).join("\n")}
                     PRODUCTOS DISPONIBLES: ${productsContext}
