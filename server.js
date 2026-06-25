@@ -593,8 +593,16 @@ function formatStockForAI(variants) {
    ========================================================================== */
 app.post("/api/ai/search", async (req, res) => {
     // 🔥🔥 AÑADIDO: 'context_handle' para saber dónde está el usuario
-    const { q, history, visible_ids, session_id, context_handle } = req.body;
+    const { q, history, visible_ids, session_id, context_handle, member_context } = req.body;
     if (!q) return res.status(400).json({ error: "Falta query" });
+
+    // 🎖️ IZAS MEMBERS: datos del socio si el cliente tiene sesión iniciada en Shopify.
+    // Vienen ya resueltos por el frontend desde /apps/izas-members/perfil (App Proxy firmado),
+    // así que aquí solo los formateamos para el prompt, sin volver a consultar nada.
+    let memberInfo = "N/A (el cliente no tiene sesión iniciada o no es socio Izas Members)";
+    if (member_context && (member_context.nivel || member_context.puntos != null)) {
+        memberInfo = `Nivel: ${member_context.nivel || "N/A"} | Puntos disponibles: ${member_context.puntos ?? "N/A"} | Equivalente en descuento: ${member_context.saldoDisponible ?? "N/A"}€`;
+    }
 
     try {
         // ---------------------------------------------------------
@@ -794,9 +802,15 @@ app.post("/api/ai/search", async (req, res) => {
                         - ✅ REVISA TODOS los productos listados abajo.
                         - Si el producto 1 no tiene, pero el producto 2 sí, responde: "Sí, la tengo disponible en talla XXL en color [Color del Producto 2]".
 
+                    7. 🎖️ PUNTOS Y NIVEL DE IZAS MEMBERS (CLIENTE ACTUAL):
+                        - Si el usuario pregunta por SUS puntos, nivel o saldo de fidelización, usa EXCLUSIVAMENTE el bloque "DATOS SOCIO IZAS MEMBERS" de abajo. No inventes ni calcules cifras.
+                        - Si dice "N/A": explica que para ver sus puntos necesita tener la sesión iniciada en la tienda, y si no es socio, que puede registrarse en Izas Members. No reveles a qué se debe el N/A técnicamente.
+                        - Para dudas generales sobre cómo funciona el programa (cómo ganar puntos, canjear, niveles, etc.) usa las FAQs, no este bloque.
+
                     --- DATOS ---
                     ALERTA SEGURIDAD: ${securityWarning || "Ninguna"}
                     DATOS PEDIDO LIVE: ${orderData || "N/A"}
+                    DATOS SOCIO IZAS MEMBERS: ${memberInfo}
                     DATOS DE MARCA: ${BRAND_INFO}
                     FAQs: ${faqResults.map(f => `P:${f.question} R:${f.answer}`).join("\n")}
                     PRODUCTOS DISPONIBLES: ${productsContext}
