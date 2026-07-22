@@ -47,7 +47,7 @@
   {
     "id": "coste_envio",
     "question": "¿Cuánto cuestan los gastos de envío?",
-    "answer": "El envío es GRATIS para pedidos superiores a 39,99€. Para pedidos inferiores, el coste es de 4,99€."
+    "answer": "El envío es GRATIS para pedidos superiores a 79,99€. Para pedidos inferiores, el coste es de 4,99€."
   },
   {
     "id": "devolucion_externa",
