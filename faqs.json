@@ -193,5 +193,10 @@
     "id": "members_baja_o_cambios_cuenta",
     "question": "¿Cómo me doy de baja de Izas Members o cambio el email de mi cuenta?",
     "answer": "Tanto la baja del programa como el cambio de email de tu cuenta no se pueden hacer desde el panel, así que tienes que escribirnos a info@izas-outdoor.com y lo gestionamos manualmente. Si te das de baja, los puntos pendientes no podrán usarse una vez sea efectiva."
+  },
+  {
+    "id": "trabaja_con_nosotros",
+    "question": "Quisiera saber cómo formar parte de su equipo",
+    "answer": "Para formar parte de nuestro equipo en Izas Outdoor, te recomiendo escribirnos a info@izas-outdoor.com. ¡Buena suerte!"
   }
 ]
