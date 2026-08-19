@@ -198,5 +198,10 @@
     "id": "trabaja_con_nosotros",
     "question": "Quisiera saber cómo formar parte de su equipo",
     "answer": "Para formar parte de nuestro equipo en Izas Outdoor, te recomiendo escribirnos a info@izas-outdoor.com. ¡Buena suerte!"
+  },
+    {
+    "id": "tiendas_fisicas_ubicaciones",
+    "question": "¿Dónde tenéis tiendas físicas? ¿Tenéis tienda en Barcelona, Madrid u otras ciudades?",
+    "answer": "Tenemos 8 tiendas físicas: tres en Zaragoza (Calle María Guerrero, La Torre Outlet y Puerto Venecia), Cuarte de Huerva, Jaca, Pamplona, Bilbao (Megapark) y Getafe (The Style Outlets, Madrid). No tenemos tienda física en ninguna otra ciudad —incluida Barcelona—; en el resto de España solo puedes comprar online."
   }
 ]
