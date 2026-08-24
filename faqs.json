@@ -203,5 +203,10 @@
     "id": "tiendas_fisicas_ubicaciones",
     "question": "¿Dónde tenéis tiendas físicas? ¿Tenéis tienda en Barcelona, Madrid u otras ciudades?",
     "answer": "Tenemos 8 tiendas físicas: tres en Zaragoza (Calle María Guerrero, La Torre Outlet y Puerto Venecia), Cuarte de Huerva, Jaca, Pamplona, Bilbao (Megapark) y Getafe (The Style Outlets, Madrid). No tenemos tienda física en ninguna otra ciudad —incluida Barcelona—; en el resto de España solo puedes comprar online."
+  },
+    {
+    "id": "descuento_estudiantes",
+    "question": "He leído que tenéis descuento para estudiantes. ¿Tenéis descuento para estudiantes?",
+    "answer": "Sí, en Izas Outdoor disponemos de un 10% de descuento para estudiantes aplicable a productos sin descuento. Para canjearlo, pudes hacerlo desde https://www.descuentoestudiante.com/Izas-descuento-estudiante-iframe"
   }
 ]
