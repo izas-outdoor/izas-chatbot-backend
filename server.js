@@ -1005,6 +1005,94 @@ app.post("/api/chat/log", async (req, res) => {
 });
 
 /* ==========================================================================
+   🧑‍💼 RESPUESTA DE AGENTE HUMANO (desde el visualizador interno)
+   ==========================================================================
+   Se guarda con role "assistant" (no "agent") a propósito: el historial de
+   conversación se reenvía tal cual a OpenAI en cada turno (ver refineQuery y
+   la llamada principal más arriba), y la API de OpenAI rechaza cualquier rol
+   que no sea system/user/assistant/tool. Usamos un marcador de texto para
+   que el widget y el visualizador sepan que ese mensaje "assistant" en
+   realidad lo escribió una persona, no el modelo.
+   ========================================================================== */
+const AGENT_MARKER = '[AGENTE_HUMANO] ';
+
+async function verifyAgentToken(req) {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    if (!token) return false;
+    const { data, error } = await supabase.auth.getUser(token);
+    return !error && !!data?.user;
+}
+
+app.post("/api/chat/agent-reply", async (req, res) => {
+    const { session_id, content } = req.body;
+    if (!session_id || !content) return res.status(400).json({ error: "Faltan datos" });
+
+    const authorized = await verifyAgentToken(req);
+    if (!authorized) return res.status(401).json({ error: "No autorizado" });
+
+    try {
+        const { data: existing } = await supabase
+            .from('chat_sessions')
+            .select('conversation')
+            .eq('session_id', session_id)
+            .single();
+
+        const history = (existing && existing.conversation) ? existing.conversation : [];
+        history.push({
+            role: 'assistant',
+            content: AGENT_MARKER + content,
+            timestamp: new Date().toISOString()
+        });
+
+        const { error } = await supabase
+            .from('chat_sessions')
+            .upsert({
+                session_id: session_id,
+                conversation: history,
+                updated_at: new Date()
+            });
+
+        if (error) throw error;
+
+        console.log(`🧑‍💼 Respuesta de agente guardada para sesión ${session_id}`);
+        res.json({ success: true });
+
+    } catch (error) {
+        console.error("❌ Error guardando respuesta de agente:", error);
+        res.status(500).json({ error: "Error interno" });
+    }
+});
+
+/* ==========================================================================
+   🔄 POLLING DE NUEVOS MENSAJES
+   ========================================================================== */
+   // El widget pregunta esto cada pocos segundos mientras el chat está abierto,
+   // para detectar respuestas de agente sin necesidad de recargar la página.
+app.get("/api/chat/updates", async (req, res) => {
+    const { session_id, count } = req.query;
+    if (!session_id) return res.status(400).json({ error: "Falta session_id" });
+
+    try {
+        const { data, error } = await supabase
+            .from('chat_sessions')
+            .select('conversation')
+            .eq('session_id', session_id)
+            .single();
+
+        if (error || !data) return res.json({ newMessages: [] });
+
+        const known = parseInt(count, 10) || 0;
+        const newMessages = (data.conversation || []).slice(known);
+        res.json({ newMessages });
+
+    } catch (error) {
+        console.error("❌ Error en polling de updates:", error);
+        res.status(500).json({ error: "Error interno" });
+    }
+});
+
+/* ==========================================================================
    🚀 INICIO DEL SERVIDOR
    ========================================================================== */
 app.listen(PORT, async () => {
