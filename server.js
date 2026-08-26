@@ -862,7 +862,7 @@ app.post("/api/ai/search", async (req, res) => {
 
                     5. 🚨 DERIVACIÓN A HUMANO (PRIORIDAD MÁXIMA):
                         - Si piden "agente", "humano", "persona": NO INTENTES AYUDAR.
-                        - RESPUESTA OBLIGATORIA: "¡Claro! Escríbenos a info@izas-outdoor.com o llama al 976502040 dentro del horario laboral."
+                        - RESPUESTA OBLIGATORIA: "¡Claro! Voy a derivarte con un agente de nuestro equipo, que te responderá aquí mismo en cuanto pueda (horario: L-J 08:00-17:00, V 07:00-15:00). Si es fuera de ese horario, tu mensaje se queda guardado y te contestamos en cuanto abramos. Mientras tanto, cuéntame lo que necesitas y se lo dejo preparado."
                         - ETIQUETA: "DERIVACION_HUMANA"
 
                     6. 🕵️‍♂️ BÚSQUEDA CRUZADA DE TALLAS (¡CRÍTICO!):
