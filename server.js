@@ -60,6 +60,57 @@ const AGENT_MARKER = '[AGENTE_HUMANO] ';
 // diferenciar "sigue derivado" de "ya se devolvió al bot".
 const AGENT_CLOSE_MARKER = '[AGENTE_CIERRA] ';
 
+// 📧 Aviso por email cuando una conversación pasa a DERIVACION_HUMANA, para
+// que el equipo se entere aunque no tenga el visualizador abierto en ese
+// momento (usa Resend, con vuestro dominio ya verificado).
+const RESEND_FROM = 'web@izas-outdoor.com';
+const AGENT_NOTIFY_EMAILS = ['it@izas-outdoor.com', 'info@izas-outdoor.com', 'mario@izas-outdoor.com'];
+const VISUALIZADOR_URL = 'https://izas-visualizador-chats-chatbot.onrender.com/';
+
+function escapeHtmlServer(value) {
+    if (value === null || value === undefined) return "";
+    return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+async function notifyAgentEmail(sessionId, lastMessage) {
+    if (!process.env.RESEND_API_KEY) {
+        console.warn("⚠️ RESEND_API_KEY no configurada: no se envía el aviso de derivación.");
+        return;
+    }
+    try {
+        const res = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                from: RESEND_FROM,
+                to: AGENT_NOTIFY_EMAILS,
+                subject: '🔴 Nueva derivación a agente humano — Chat Izas',
+                html: `
+                    <p>Un cliente ha pedido hablar con un agente en el chatbot de la web.</p>
+                    <p><b>Último mensaje del cliente:</b><br>${escapeHtmlServer(lastMessage)}</p>
+                    <p><a href="${VISUALIZADOR_URL}">Abrir el visualizador de chats</a></p>
+                    <p style="color:#888;font-size:12px;">ID de sesión: ${escapeHtmlServer(sessionId)}</p>
+                `
+            })
+        });
+        if (!res.ok) {
+            console.error("❌ Error enviando email de derivación:", res.status, await res.text());
+        } else {
+            console.log(`📧 Aviso de derivación enviado para sesión ${sessionId}`);
+        }
+    } catch (err) {
+        console.error("❌ Excepción enviando email de derivación:", err);
+    }
+}
+
 app.use(cors({ origin: "*" })); // Permite conexiones desde cualquier lugar
 app.use(express.json()); // Permite recibir datos JSON
 
@@ -609,13 +660,15 @@ app.post("/api/ai/search", async (req, res) => {
     // humano guardada en esta sesión, el bot deja de contestar (para no pisar
     // al agente). Solo guardamos el mensaje del cliente para que se vea en el
     // visualizador; no llamamos a OpenAI ni gastamos esa consulta.
+    let previousCategory = null;
     if (session_id) {
         const { data: existingSession } = await supabase
             .from('chat_sessions')
-            .select('conversation')
+            .select('conversation, category')
             .eq('session_id', session_id)
             .single();
 
+        previousCategory = existingSession?.category || null;
         const storedConversation = existingSession?.conversation || [];
 
         // Miramos el ÚLTIMO mensaje marcado (de agente o de cierre), no si
@@ -988,13 +1041,20 @@ app.post("/api/ai/search", async (req, res) => {
           }
         ];
         const fullHistoryToSave = [...(history || []), ...newInteraction];
+        const newCategory = aiContent.category || "GENERAL";
 
         supabase.from('chat_sessions').upsert({
             session_id: currentSessionId,
             conversation: fullHistoryToSave,
-            category: aiContent.category || "GENERAL",
+            category: newCategory,
             updated_at: new Date()
         }, { onConflict: 'session_id' }).then(({ error }) => { if (error) console.error("❌ Error Supabase:", error); });
+
+        // Avisamos solo en el momento en que la conversación PASA a derivada
+        // (no en cada mensaje mientras lo siga estando).
+        if (newCategory === 'DERIVACION_HUMANA' && previousCategory !== 'DERIVACION_HUMANA') {
+            notifyAgentEmail(currentSessionId, q);
+        }
 
         const isSizeContext = /talla|medida|guia|dimension|size/i.test(q);
         
