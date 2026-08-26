@@ -1059,10 +1059,14 @@ app.post("/api/ai/search", async (req, res) => {
         const isSizeContext = /talla|medida|guia|dimension|size/i.test(q);
         
         // Enviamos la respuesta final limpia al Frontend
-        res.json({ 
-            products: finalProducts, 
-            text: aiContent.reply, 
-            isSizeContext: isSizeContext 
+        // (incluimos "category" para que el widget sepa, en el momento, si
+        // esta respuesta es una derivación a humano y pueda callar el aviso
+        // de "¿te he resuelto las dudas?" sin esperar a que el agente conteste)
+        res.json({
+            products: finalProducts,
+            text: aiContent.reply,
+            isSizeContext: isSizeContext,
+            category: newCategory
         });
 
     } catch (error) {
