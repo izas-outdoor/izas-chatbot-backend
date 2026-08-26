@@ -96,7 +96,7 @@ async function notifyAgentEmail(sessionId, lastMessage) {
                 html: `
                     <p>Un cliente ha pedido hablar con un agente en el chatbot de la web.</p>
                     <p><b>Último mensaje del cliente:</b><br>${escapeHtmlServer(lastMessage)}</p>
-                    <p><a href="${VISUALIZADOR_URL}">Abrir el visualizador de chats</a></p>
+                    <p><a href="${VISUALIZADOR_URL}?session=${encodeURIComponent(sessionId)}">Abrir esta conversación en el visualizador</a></p>
                     <p style="color:#888;font-size:12px;">ID de sesión: ${escapeHtmlServer(sessionId)}</p>
                 `
             })
@@ -1078,6 +1078,16 @@ app.post("/api/chat/log", async (req, res) => {
     const { session_id, role, content } = req.body;
 
     if (!session_id || !role || !content) return res.status(400).json({ error: "Faltan datos" });
+
+    // 🔒 Este endpoint no tiene login (lo llama el widget de forma anónima),
+    // así que cualquiera que supiera un session_id podría escribir aquí.
+    // Bloqueamos específicamente los marcadores de agente para que nadie
+    // pueda falsificar una respuesta de agente o un cierre de derivación sin
+    // pasar por /api/chat/agent-reply o /api/chat/agent-close (que sí exigen
+    // el token de la sesión del visualizador).
+    if (content.startsWith(AGENT_MARKER) || content.startsWith(AGENT_CLOSE_MARKER)) {
+        return res.status(400).json({ error: "Contenido no permitido" });
+    }
 
     try {
         // 1. Recuperamos la conversación actual
