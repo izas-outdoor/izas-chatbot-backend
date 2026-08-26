@@ -55,6 +55,10 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 // desde el visualizador interno (ver el endpoint /api/chat/agent-reply más
 // abajo). Debe coincidir exactamente con el mismo marcador en el widget.
 const AGENT_MARKER = '[AGENTE_HUMANO] ';
+// Marca el mensaje que cierra la derivación: a partir de este punto el bot
+// vuelve a contestar. Debe ser distinto de AGENT_MARKER para poder
+// diferenciar "sigue derivado" de "ya se devolvió al bot".
+const AGENT_CLOSE_MARKER = '[AGENTE_CIERRA] ';
 
 app.use(cors({ origin: "*" })); // Permite conexiones desde cualquier lugar
 app.use(express.json()); // Permite recibir datos JSON
@@ -613,9 +617,17 @@ app.post("/api/ai/search", async (req, res) => {
             .single();
 
         const storedConversation = existingSession?.conversation || [];
-        const hasAgentTakenOver = storedConversation.some(
-            m => typeof m.content === 'string' && m.content.startsWith(AGENT_MARKER)
-        );
+
+        // Miramos el ÚLTIMO mensaje marcado (de agente o de cierre), no si
+        // "alguna vez" hubo un agente: así, si el agente ya devolvió la
+        // conversación al bot, el bot vuelve a contestar con normalidad.
+        let hasAgentTakenOver = false;
+        for (let i = storedConversation.length - 1; i >= 0; i--) {
+            const c = storedConversation[i]?.content;
+            if (typeof c !== 'string') continue;
+            if (c.startsWith(AGENT_CLOSE_MARKER)) { hasAgentTakenOver = false; break; }
+            if (c.startsWith(AGENT_MARKER)) { hasAgentTakenOver = true; break; }
+        }
 
         if (hasAgentTakenOver) {
             const updatedConversation = [
@@ -1100,6 +1112,49 @@ app.post("/api/chat/agent-reply", async (req, res) => {
 
     } catch (error) {
         console.error("❌ Error guardando respuesta de agente:", error);
+        res.status(500).json({ error: "Error interno" });
+    }
+});
+
+/* ==========================================================================
+   🔓 DEVOLVER LA CONVERSACIÓN AL BOT (cerrar sesión de agente)
+   ========================================================================== */
+app.post("/api/chat/agent-close", async (req, res) => {
+    const { session_id } = req.body;
+    if (!session_id) return res.status(400).json({ error: "Faltan datos" });
+
+    const authorized = await verifyAgentToken(req);
+    if (!authorized) return res.status(401).json({ error: "No autorizado" });
+
+    try {
+        const { data: existing } = await supabase
+            .from('chat_sessions')
+            .select('conversation')
+            .eq('session_id', session_id)
+            .single();
+
+        const history = (existing && existing.conversation) ? existing.conversation : [];
+        history.push({
+            role: 'assistant',
+            content: AGENT_CLOSE_MARKER + 'El agente ha cerrado la conversación. Si necesitas algo más, aquí estoy para ayudarte 😊',
+            timestamp: new Date().toISOString()
+        });
+
+        const { error } = await supabase
+            .from('chat_sessions')
+            .upsert({
+                session_id: session_id,
+                conversation: history,
+                updated_at: new Date()
+            });
+
+        if (error) throw error;
+
+        console.log(`🔓 Conversación devuelta al bot: ${session_id}`);
+        res.json({ success: true });
+
+    } catch (error) {
+        console.error("❌ Error cerrando sesión de agente:", error);
         res.status(500).json({ error: "Error interno" });
     }
 });
