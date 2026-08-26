@@ -51,6 +51,11 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
+// Marca los mensajes "assistant" que en realidad escribió un agente humano
+// desde el visualizador interno (ver el endpoint /api/chat/agent-reply más
+// abajo). Debe coincidir exactamente con el mismo marcador en el widget.
+const AGENT_MARKER = '[AGENTE_HUMANO] ';
+
 app.use(cors({ origin: "*" })); // Permite conexiones desde cualquier lugar
 app.use(express.json()); // Permite recibir datos JSON
 
@@ -596,6 +601,42 @@ app.post("/api/ai/search", async (req, res) => {
     const { q, history, visible_ids, session_id, context_handle, member_context, customer_email, login_url } = req.body;
     if (!q) return res.status(400).json({ error: "Falta query" });
 
+    // 🧑‍💼 CONVERSACIÓN DERIVADA A UN AGENTE: si ya hay una respuesta de agente
+    // humano guardada en esta sesión, el bot deja de contestar (para no pisar
+    // al agente). Solo guardamos el mensaje del cliente para que se vea en el
+    // visualizador; no llamamos a OpenAI ni gastamos esa consulta.
+    if (session_id) {
+        const { data: existingSession } = await supabase
+            .from('chat_sessions')
+            .select('conversation')
+            .eq('session_id', session_id)
+            .single();
+
+        const storedConversation = existingSession?.conversation || [];
+        const hasAgentTakenOver = storedConversation.some(
+            m => typeof m.content === 'string' && m.content.startsWith(AGENT_MARKER)
+        );
+
+        if (hasAgentTakenOver) {
+            const updatedConversation = [
+                ...storedConversation,
+                { role: 'user', content: q, timestamp: new Date().toISOString() }
+            ];
+
+            const { error: handoffError } = await supabase
+                .from('chat_sessions')
+                .upsert({
+                    session_id,
+                    conversation: updatedConversation,
+                    updated_at: new Date()
+                });
+
+            if (handoffError) console.error("❌ Error guardando mensaje en conversación derivada:", handoffError);
+
+            return res.json({ handedOff: true, text: null, products: [] });
+        }
+    }
+
     // 🎖️ IZAS MEMBERS: datos del socio si el cliente tiene sesión iniciada en Shopify.
     // Vienen ya resueltos por el frontend desde /apps/izas-members/perfil (App Proxy firmado),
     // así que aquí solo los formateamos para el prompt, sin volver a consultar nada.
@@ -1014,7 +1055,6 @@ app.post("/api/chat/log", async (req, res) => {
    que el widget y el visualizador sepan que ese mensaje "assistant" en
    realidad lo escribió una persona, no el modelo.
    ========================================================================== */
-const AGENT_MARKER = '[AGENTE_HUMANO] ';
 
 async function verifyAgentToken(req) {
     const authHeader = req.headers.authorization || '';
