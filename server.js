@@ -286,6 +286,7 @@ async function getAllProducts() {
                 node {
                   id title price availableForSale inventoryQuantity
                   selectedOptions { name value }
+                  image { url }
                 }
               }
             }
@@ -510,6 +511,11 @@ let aiIndex = []; // Aquí viven los productos en memoria RAM
 let faqIndex = []; // Aquí viven las FAQs en memoria RAM
 const INDEX_FILE = "./ai-index.json";
 const FAQ_FILE = "./faqs.json";
+// 🔥 Súbelo cada vez que cambie la FORMA de los datos que guardamos en el
+// índice (ej: añadir un campo nuevo tipo "imagen por variante"). Así, aunque
+// quede en disco una caché vieja, se descarta y se reindexa desde Shopify en
+// vez de servir datos con el campo nuevo siempre vacío.
+const INDEX_SCHEMA_VERSION = 2;
 
 function buildAIText(product) {
     return `TIPO: ${product.productType}\nTITULO: ${product.title}\nDESC: ${product.description}\nTAGS: ${product.tags.join(", ")}`;
@@ -521,10 +527,16 @@ async function loadIndexes() {
     if (fs.existsSync(INDEX_FILE)) {
         console.log("📦 Cargando productos desde caché (arranque rápido)...");
         try {
-            aiIndex = JSON.parse(fs.readFileSync(INDEX_FILE, "utf8"));
-        } catch (e) { 
+            const cached = JSON.parse(fs.readFileSync(INDEX_FILE, "utf8"));
+            if (cached && cached.schemaVersion === INDEX_SCHEMA_VERSION && Array.isArray(cached.products)) {
+                aiIndex = cached.products;
+            } else {
+                console.log("♻️ Caché con formato antiguo (falta imagen por variante), se ignora y se reindexa.");
+                aiIndex = [];
+            }
+        } catch (e) {
             console.error("⚠️ Caché corrupta, se ignorará.");
-            aiIndex = []; 
+            aiIndex = [];
         }
     }
 
@@ -544,8 +556,8 @@ async function loadIndexes() {
                 }
                 aiIndex = tempIndex; // Actualizamos la memoria
                 
-                try { 
-                    fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex)); 
+                try {
+                    fs.writeFileSync(INDEX_FILE, JSON.stringify({ schemaVersion: INDEX_SCHEMA_VERSION, products: aiIndex }));
                     console.log("💾 Índice guardado en disco.");
                 } catch (e) { console.error("⚠️ No se pudo guardar caché en disco (read-only system?)"); }
             } else {
