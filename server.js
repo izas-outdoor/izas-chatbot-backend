@@ -859,6 +859,15 @@ app.post("/api/ai/search", async (req, res) => {
             const cleanDescription = cleanText(p.body_html || p.description);
             const stockText = formatStockForAI(p.variants); // Generado con datos frescos
 
+            // 🖼️ MAPA COLOR -> ID DE VARIANTE (para que la IA pueda pedir la imagen del color correcto)
+            const colorVariantIds = {};
+            (p.variants || []).forEach(v => {
+                const colorOpt = v.selectedOptions?.find(o => o.name.toLowerCase() === "color");
+                const color = colorOpt ? colorOpt.value : "Único";
+                if (!colorVariantIds[color]) colorVariantIds[color] = v.id;
+            });
+            const variantIdsText = Object.entries(colorVariantIds).map(([c, vid]) => `${c}=${vid}`).join(", ");
+
             // ETIQUETA VISUAL PARA LA IA
             let tag = "";
             if (productOnScreen && String(p.id) === String(productOnScreen.id)) tag = " (🔥 USUARIO VIENDO AHORA)";
@@ -869,6 +878,7 @@ app.post("/api/ai/search", async (req, res) => {
             - Título: ${p.title}
             - Precio: ${p.price} €
             - Colores: ${officialColors}
+            - IDs de variante por color: ${variantIdsText}
             - Stock: ${stockText}`;
         }).join("\n\n");
 
@@ -912,6 +922,13 @@ app.post("/api/ai/search", async (req, res) => {
                           1. JSON "reply": "He encontrado varias opciones para [Nombre]. Por favor, selecciona abajo el modelo exacto."
                           2. ⚠️ JSON "products": [ID1, ID2, ID3...] <-- ¡OBLIGATORIO LLENARLO CON TODO LO ENCONTRADO!
                         - PROHIBIDO: No des enlaces de tallas ni precios específicos en el texto si estás en este modo. Obliga al usuario a clicar en la tarjeta.
+
+                    4bis. 🎨 IMAGEN DEL COLOR CORRECTO (¡MUY IMPORTANTE, EVITA UN BUG CONOCIDO!):
+                        - Cada producto de abajo trae "IDs de variante por color" (ej: "WHITE=41234, BLACK=41235").
+                        - Si el usuario ha pedido/filtrado por un color concreto (ej: "blancas", "en negro") o solo tiene sentido recomendar un color concreto según la conversación, NO metas el ID del producto como texto/número suelto en "products".
+                        - En su lugar, mete un OBJETO: {"id": "<ID del producto>", "variant_id": "<ID de variante correspondiente a ESE color, sacado de 'IDs de variante por color'>"}.
+                        - Esto es lo que hace que la tarjeta muestre la foto del color correcto (si no mandas variant_id, se muestra la foto por defecto del producto y el cliente ve un color que no pidió).
+                        - Si NO hay un color concreto en juego (ej. modo carrusel de familias, o el producto es de color único), puedes seguir mandando solo el ID como antes (string o número).
 
                     5. 🚨 DERIVACIÓN A HUMANO (PRIORIDAD MÁXIMA):
                         - Si piden "agente", "humano", "persona": NO INTENTES AYUDAR.
