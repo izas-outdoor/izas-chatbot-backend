@@ -965,6 +965,16 @@ app.post("/api/ai/search", async (req, res) => {
                         - Si "ALERTA SEGURIDAD" es "FALTA_EMAIL", pide el email de la compra. Si es "FALTA_PEDIDO_ID", pide el número de pedido. Si no hay alerta y falta el número, simplemente pídelo.
                         - Solo si tras pedir el número de pedido el cliente no puede dártelo o el sistema no lo encuentra, deriva a info@izas-outdoor.com.
 
+                    9. 🏷️ ETIQUETA DE LA CONVERSACIÓN (campo "category"):
+                        - OBLIGATORIO: elige EXACTAMENTE UNA de esta lista cerrada. Nunca inventes una etiqueta nueva ni la escribas de otra forma (ni tildes distintas, ni sinónimos, ni en otro idioma): así evitamos que la misma duda quede repartida en estadísticas bajo nombres distintos.
+                        - "PRODUCTO": dudas sobre productos concretos (características, tallas, colores, stock, comparar modelos, recomendaciones).
+                        - "PEDIDO": estado o seguimiento de un pedido ya realizado.
+                        - "ENVIO": plazos, costes, zonas o condiciones de envío (sin ser sobre un pedido concreto).
+                        - "DEVOLUCION": devoluciones, cambios o cancelaciones.
+                        - "MEMBERS": cualquier cosa sobre Izas Members (puntos, nivel, ventajas, cómo funciona, alta al programa).
+                        - "DERIVACION_HUMANA": ya definida en la regla 5, tiene prioridad sobre cualquier otra etiqueta.
+                        - "GENERAL": todo lo demás (saludos, marca, dudas que no encajan arriba).
+
                     --- DATOS ---
                     ALERTA SEGURIDAD: ${securityWarning || "Ninguna"}
                     DATOS PEDIDO LIVE: ${orderData || "N/A"}
@@ -973,7 +983,7 @@ app.post("/api/ai/search", async (req, res) => {
                     FAQs: ${faqResults.map(f => `P:${f.question} R:${f.answer}`).join("\n")}
                     PRODUCTOS DISPONIBLES: ${productsContext}
 
-                    Responde JSON: { "reply": "...", "products": [...], "category": "ETIQUETA" }
+                    Responde JSON: { "reply": "...", "products": [...], "category": "PRODUCTO|PEDIDO|ENVIO|DEVOLUCION|MEMBERS|DERIVACION_HUMANA|GENERAL" }
                     `
                 },
                 ...history.slice(-2).map(m => ({ role: m.role, content: m.content })),
