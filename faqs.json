@@ -122,7 +122,7 @@
   {
     "id": "members_ventajas_nivel",
     "question": "¿Qué ventajas tengo según mi nivel en Izas Members (Bronce, Plata, Oro)?",
-    "answer": "Bronce: envío gratis desde 59,99€ y regalo de cumpleaños de 100 puntos. Plata: envío gratis desde 49,99€, +10% de puntos en compras de 200€ o más, acceso anticipado a colecciones y 150 puntos de regalo de cumpleaños. Oro: envío siempre gratis, +20% de puntos en compras de 200€ o más, acceso anticipado y 200 puntos de regalo de cumpleaños más un cupón del 10% válido 7 días."
+    "answer": "Bronce: envío gratis a partir de 60€ y regalo de cumpleaños de 100 puntos. Plata: envío gratis a partir de 50€, +10% de puntos en compras de 200€ o más, acceso anticipado a colecciones y 150 puntos de regalo de cumpleaños. Oro: envío siempre gratis, +20% de puntos en compras de 200€ o más, acceso anticipado y 200 puntos de regalo de cumpleaños más un cupón del 10% válido 7 días."
   },
   {
     "id": "members_multiplicador_puntos",
