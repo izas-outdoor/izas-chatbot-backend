@@ -120,6 +120,8 @@ const ADMIN_TOKEN = process.env.SHOPIFY_ADMIN_TOKEN;
 
 // Credenciales OpenAI
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// gpt-4o se retira el 14/01/2027; gpt-6-luna es el reemplazo recomendado por OpenAI.
+const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-6-luna";
 
 
 /* ==========================================================================
@@ -286,7 +288,6 @@ async function getAllProducts() {
                 node {
                   id title price availableForSale inventoryQuantity
                   selectedOptions { name value }
-                  image { url }
                 }
               }
             }
@@ -511,11 +512,6 @@ let aiIndex = []; // Aquí viven los productos en memoria RAM
 let faqIndex = []; // Aquí viven las FAQs en memoria RAM
 const INDEX_FILE = "./ai-index.json";
 const FAQ_FILE = "./faqs.json";
-// 🔥 Súbelo cada vez que cambie la FORMA de los datos que guardamos en el
-// índice (ej: añadir un campo nuevo tipo "imagen por variante"). Así, aunque
-// quede en disco una caché vieja, se descarta y se reindexa desde Shopify en
-// vez de servir datos con el campo nuevo siempre vacío.
-const INDEX_SCHEMA_VERSION = 2;
 
 function buildAIText(product) {
     return `TIPO: ${product.productType}\nTITULO: ${product.title}\nDESC: ${product.description}\nTAGS: ${product.tags.join(", ")}`;
@@ -527,16 +523,10 @@ async function loadIndexes() {
     if (fs.existsSync(INDEX_FILE)) {
         console.log("📦 Cargando productos desde caché (arranque rápido)...");
         try {
-            const cached = JSON.parse(fs.readFileSync(INDEX_FILE, "utf8"));
-            if (cached && cached.schemaVersion === INDEX_SCHEMA_VERSION && Array.isArray(cached.products)) {
-                aiIndex = cached.products;
-            } else {
-                console.log("♻️ Caché con formato antiguo (falta imagen por variante), se ignora y se reindexa.");
-                aiIndex = [];
-            }
-        } catch (e) {
+            aiIndex = JSON.parse(fs.readFileSync(INDEX_FILE, "utf8"));
+        } catch (e) { 
             console.error("⚠️ Caché corrupta, se ignorará.");
-            aiIndex = [];
+            aiIndex = []; 
         }
     }
 
@@ -556,8 +546,8 @@ async function loadIndexes() {
                 }
                 aiIndex = tempIndex; // Actualizamos la memoria
                 
-                try {
-                    fs.writeFileSync(INDEX_FILE, JSON.stringify({ schemaVersion: INDEX_SCHEMA_VERSION, products: aiIndex }));
+                try { 
+                    fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex)); 
                     console.log("💾 Índice guardado en disco.");
                 } catch (e) { console.error("⚠️ No se pudo guardar caché en disco (read-only system?)"); }
             } else {
@@ -588,7 +578,7 @@ async function loadIndexes() {
 // 🧹 REFINAMIENTO: Traduce "quiero unos pantalones" a una query técnica
 async function refineQuery(userQuery, history) {
     const response = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: CHAT_MODEL,
         messages: [
             {
                 role: "system",
@@ -607,8 +597,8 @@ async function refineQuery(userQuery, history) {
             },
             ...history.slice(-4),
             { role: "user", content: userQuery }
-        ],
-        temperature: 0
+        ]
+        // gpt-6-luna no admite temperature distinto de 1 (da error 400), por eso no se envía.
     });
     return response.choices[0].message.content;
 }
@@ -871,15 +861,6 @@ app.post("/api/ai/search", async (req, res) => {
             const cleanDescription = cleanText(p.body_html || p.description);
             const stockText = formatStockForAI(p.variants); // Generado con datos frescos
 
-            // 🖼️ MAPA COLOR -> ID DE VARIANTE (para que la IA pueda pedir la imagen del color correcto)
-            const colorVariantIds = {};
-            (p.variants || []).forEach(v => {
-                const colorOpt = v.selectedOptions?.find(o => o.name.toLowerCase() === "color");
-                const color = colorOpt ? colorOpt.value : "Único";
-                if (!colorVariantIds[color]) colorVariantIds[color] = v.id;
-            });
-            const variantIdsText = Object.entries(colorVariantIds).map(([c, vid]) => `${c}=${vid}`).join(", ");
-
             // ETIQUETA VISUAL PARA LA IA
             let tag = "";
             if (productOnScreen && String(p.id) === String(productOnScreen.id)) tag = " (🔥 USUARIO VIENDO AHORA)";
@@ -890,7 +871,6 @@ app.post("/api/ai/search", async (req, res) => {
             - Título: ${p.title}
             - Precio: ${p.price} €
             - Colores: ${officialColors}
-            - IDs de variante por color: ${variantIdsText}
             - Stock: ${stockText}`;
         }).join("\n\n");
 
@@ -898,9 +878,8 @@ app.post("/api/ai/search", async (req, res) => {
         // 3. 🗣️ GENERACIÓN DE RESPUESTA (OPENAI)
         // ---------------------------------------------------------
         const completion = await openai.chat.completions.create({
-            model: "gpt-4o",
+            model: CHAT_MODEL,
             response_format: { type: "json_object" },
-            temperature: 0.1,
             messages: [
                 {
                     role: "system",
@@ -935,13 +914,6 @@ app.post("/api/ai/search", async (req, res) => {
                           2. ⚠️ JSON "products": [ID1, ID2, ID3...] <-- ¡OBLIGATORIO LLENARLO CON TODO LO ENCONTRADO!
                         - PROHIBIDO: No des enlaces de tallas ni precios específicos en el texto si estás en este modo. Obliga al usuario a clicar en la tarjeta.
 
-                    4bis. 🎨 IMAGEN DEL COLOR CORRECTO (¡MUY IMPORTANTE, EVITA UN BUG CONOCIDO!):
-                        - Cada producto de abajo trae "IDs de variante por color" (ej: "WHITE=41234, BLACK=41235").
-                        - Si el usuario ha pedido/filtrado por un color concreto (ej: "blancas", "en negro") o solo tiene sentido recomendar un color concreto según la conversación, NO metas el ID del producto como texto/número suelto en "products".
-                        - En su lugar, mete un OBJETO: {"id": "<ID del producto>", "variant_id": "<ID de variante correspondiente a ESE color, sacado de 'IDs de variante por color'>"}.
-                        - Esto es lo que hace que la tarjeta muestre la foto del color correcto (si no mandas variant_id, se muestra la foto por defecto del producto y el cliente ve un color que no pidió).
-                        - Si NO hay un color concreto en juego (ej. modo carrusel de familias, o el producto es de color único), puedes seguir mandando solo el ID como antes (string o número).
-
                     5. 🚨 DERIVACIÓN A HUMANO (PRIORIDAD MÁXIMA):
                         - Si piden "agente", "humano", "persona": NO INTENTES AYUDAR.
                         - RESPUESTA OBLIGATORIA: "¡Claro! Voy a derivarte con un agente de nuestro equipo, que te responderá aquí mismo en cuanto pueda (horario: L-J 08:00-17:00, V 07:00-15:00). Si es fuera de ese horario, tu mensaje se queda guardado y te contestamos en cuanto abramos. Mientras tanto, cuéntame lo que necesitas y se lo dejo preparado."
@@ -965,16 +937,6 @@ app.post("/api/ai/search", async (req, res) => {
                         - Si "ALERTA SEGURIDAD" es "FALTA_EMAIL", pide el email de la compra. Si es "FALTA_PEDIDO_ID", pide el número de pedido. Si no hay alerta y falta el número, simplemente pídelo.
                         - Solo si tras pedir el número de pedido el cliente no puede dártelo o el sistema no lo encuentra, deriva a info@izas-outdoor.com.
 
-                    9. 🏷️ ETIQUETA DE LA CONVERSACIÓN (campo "category"):
-                        - OBLIGATORIO: elige EXACTAMENTE UNA de esta lista cerrada. Nunca inventes una etiqueta nueva ni la escribas de otra forma (ni tildes distintas, ni sinónimos, ni en otro idioma): así evitamos que la misma duda quede repartida en estadísticas bajo nombres distintos.
-                        - "PRODUCTO": dudas sobre productos concretos (características, tallas, colores, stock, comparar modelos, recomendaciones).
-                        - "PEDIDO": estado o seguimiento de un pedido ya realizado.
-                        - "ENVIO": plazos, costes, zonas o condiciones de envío (sin ser sobre un pedido concreto).
-                        - "DEVOLUCION": devoluciones, cambios o cancelaciones.
-                        - "MEMBERS": cualquier cosa sobre Izas Members (puntos, nivel, ventajas, cómo funciona, alta al programa).
-                        - "DERIVACION_HUMANA": ya definida en la regla 5, tiene prioridad sobre cualquier otra etiqueta.
-                        - "GENERAL": todo lo demás (saludos, marca, dudas que no encajan arriba).
-
                     --- DATOS ---
                     ALERTA SEGURIDAD: ${securityWarning || "Ninguna"}
                     DATOS PEDIDO LIVE: ${orderData || "N/A"}
@@ -983,7 +945,7 @@ app.post("/api/ai/search", async (req, res) => {
                     FAQs: ${faqResults.map(f => `P:${f.question} R:${f.answer}`).join("\n")}
                     PRODUCTOS DISPONIBLES: ${productsContext}
 
-                    Responde JSON: { "reply": "...", "products": [...], "category": "PRODUCTO|PEDIDO|ENVIO|DEVOLUCION|MEMBERS|DERIVACION_HUMANA|GENERAL" }
+                    Responde JSON: { "reply": "...", "products": [...], "category": "ETIQUETA" }
                     `
                 },
                 ...history.slice(-2).map(m => ({ role: m.role, content: m.content })),
