@@ -18,6 +18,7 @@ import "dotenv/config";
 import fetch from "node-fetch";
 import OpenAI from "openai";
 import fs from "fs";
+import crypto from "crypto";
 import cors from "cors";
 import { COLOR_CONCEPTS, CONCEPTS } from "./concepts.js"; // Diccionarios de sinónimos
 import { createClient } from "@supabase/supabase-js";
@@ -288,6 +289,7 @@ async function getAllProducts() {
                 node {
                   id title price availableForSale inventoryQuantity
                   selectedOptions { name value }
+                  image { url }
                 }
               }
             }
@@ -512,67 +514,142 @@ let aiIndex = []; // Aquí viven los productos en memoria RAM
 let faqIndex = []; // Aquí viven las FAQs en memoria RAM
 const INDEX_FILE = "./ai-index.json";
 const FAQ_FILE = "./faqs.json";
+// 🔥 Súbelo cada vez que cambie la FORMA de los datos que guardamos en el
+// índice (ej: añadir un campo nuevo tipo "imagen por variante"). Así, aunque
+// quede en disco una caché vieja, se descarta y se reindexa desde Shopify en
+// vez de servir datos con el campo nuevo siempre vacío.
+const INDEX_SCHEMA_VERSION = 2;
 
 function buildAIText(product) {
     return `TIPO: ${product.productType}\nTITULO: ${product.title}\nDESC: ${product.description}\nTAGS: ${product.tags.join(", ")}`;
 }
 
-// Carga los productos al iniciar el servidor (Caché -> O descarga nueva)
+// Sincronización del catálogo con Shopify. Se ejecuta al arrancar y luego cada
+// SYNC_INTERVAL_MS (por defecto 6 h), así los productos nuevos o modificados
+// aparecen solos sin redeploy. Es incremental: solo se vectorizan (OpenAI) los
+// productos nuevos o cuyo texto indexable cambió; el resto reutiliza su
+// embedding, y los productos borrados o despublicados se eliminan.
+const SYNC_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS) || 6 * 60 * 60 * 1000;
+let syncInFlight = null;
+let lastSync = null; // { at, added, updated, removed, total }
+
+function textHash(product) {
+    return crypto.createHash("sha1").update(buildAIText(product)).digest("hex");
+}
+
+function saveIndexToDisk() {
+    try {
+        fs.writeFileSync(INDEX_FILE, JSON.stringify({ schemaVersion: INDEX_SCHEMA_VERSION, products: aiIndex }));
+    } catch (e) { console.error("⚠️ No se pudo guardar caché en disco (read-only system?)"); }
+}
+
+async function syncCatalog() {
+    // Si ya hay una sincronización en curso, nos unimos a ella en vez de lanzar otra.
+    if (syncInFlight) return syncInFlight;
+
+    syncInFlight = (async () => {
+        const products = await getAllProducts();
+
+        // Red de seguridad: si Shopify devuelve vacío (error, límite de API...)
+        // mantenemos el índice actual en vez de dejar el chatbot sin catálogo.
+        if (!products || products.length === 0) {
+            console.warn("⚠️ Sync: Shopify devolvió 0 productos, se mantiene el índice actual.");
+            return null;
+        }
+
+        const previous = new Map(aiIndex.map(p => [String(p.id), p]));
+        const next = [];
+        let added = 0, updated = 0;
+
+        for (const p of products) {
+            const old = previous.get(String(p.id));
+            if (old && Array.isArray(old.embedding) && textHash(old) === textHash(p)) {
+                // Mismo texto indexable: datos frescos de Shopify + embedding reutilizado.
+                next.push({ ...p, embedding: old.embedding });
+                continue;
+            }
+            try {
+                const emb = await openai.embeddings.create({ model: "text-embedding-3-large", input: buildAIText(p) });
+                next.push({ ...p, embedding: emb.data[0].embedding });
+                old ? updated++ : added++;
+            } catch (e) {
+                // Si falla un producto no tumbamos la sync: conservamos su versión
+                // anterior (si la había) y se reintenta en el siguiente ciclo.
+                console.error(`⚠️ Sync: no se pudo vectorizar "${p.title}":`, e.message);
+                if (old) next.push(old);
+            }
+        }
+
+        const nextIds = new Set(next.map(p => String(p.id)));
+        const removed = [...previous.keys()].filter(id => !nextIds.has(id)).length;
+
+        aiIndex = next; // Cambio atómico: las peticiones en curso no ven un índice a medias.
+        saveIndexToDisk();
+        lastSync = { at: new Date().toISOString(), added, updated, removed, total: aiIndex.length };
+        console.log(`🔄 Sync catálogo: +${added} nuevos, ${updated} cambiados, -${removed} eliminados. Total: ${aiIndex.length}`);
+        return lastSync;
+    })().finally(() => { syncInFlight = null; });
+
+    return syncInFlight;
+}
+
+let faqsLoading = false;
+async function loadFaqs() {
+    if (faqsLoading || !fs.existsSync(FAQ_FILE)) return;
+    faqsLoading = true;
+    try {
+        const rawFaqs = JSON.parse(fs.readFileSync(FAQ_FILE, "utf8"));
+        const next = [];
+        console.log("🤖 Indexando FAQs...");
+        for (const f of rawFaqs) {
+            const emb = await openai.embeddings.create({ model: "text-embedding-3-large", input: f.question });
+            next.push({ ...f, embedding: emb.data[0].embedding });
+        }
+        faqIndex = next;
+        console.log(`✅ FAQs listas: ${faqIndex.length}`);
+    } catch(e) { console.error("Error cargando FAQs:", e); }
+    finally { faqsLoading = false; }
+}
+
+// Carga los productos al iniciar el servidor (caché en disco para arrancar
+// rápido) y después los sincroniza con Shopify.
 async function loadIndexes() {
-    // 1. Intentamos cargar de caché primero para arrancar rápido
-    if (fs.existsSync(INDEX_FILE)) {
+    // 1. Caché primero: permite responder mientras se sincroniza
+    if (aiIndex.length === 0 && fs.existsSync(INDEX_FILE)) {
         console.log("📦 Cargando productos desde caché (arranque rápido)...");
         try {
-            aiIndex = JSON.parse(fs.readFileSync(INDEX_FILE, "utf8"));
-        } catch (e) { 
+            const cached = JSON.parse(fs.readFileSync(INDEX_FILE, "utf8"));
+            if (cached && cached.schemaVersion === INDEX_SCHEMA_VERSION && Array.isArray(cached.products)) {
+                aiIndex = cached.products;
+            } else {
+                console.log("♻️ Caché con formato antiguo (falta imagen por variante), se ignora y se reindexa.");
+                aiIndex = [];
+            }
+        } catch (e) {
             console.error("⚠️ Caché corrupta, se ignorará.");
-            aiIndex = []; 
+            aiIndex = [];
         }
     }
 
-    // 2. Si no hay datos (o queremos refrescar), descargamos de Shopify
-    if (aiIndex.length === 0) {
-        console.log("🤖 Indexando productos en Shopify (esto puede tardar)...");
-        try {
-            const products = await getAllProducts();
-            
-            if (products.length > 0) {
-                // Limpiamos el índice anterior antes de llenar
-                const tempIndex = [];
-                for (const p of products) {
-                    // Vectorizamos cada producto para que la IA lo entienda
-                    const emb = await openai.embeddings.create({ model: "text-embedding-3-large", input: buildAIText(p) });
-                    tempIndex.push({ ...p, embedding: emb.data[0].embedding });
-                }
-                aiIndex = tempIndex; // Actualizamos la memoria
-                
-                try { 
-                    fs.writeFileSync(INDEX_FILE, JSON.stringify(aiIndex)); 
-                    console.log("💾 Índice guardado en disco.");
-                } catch (e) { console.error("⚠️ No se pudo guardar caché en disco (read-only system?)"); }
-            } else {
-                console.warn("⚠️ Advertencia: Shopify devolvió 0 productos.");
-            }
-        } catch (error) {
-            console.error("❌ ERROR CRÍTICO INDEXANDO:", error);
-            // No hacemos throw para que el servidor no se caiga
-        }
+    // 2. Sincronizamos con Shopify (aunque haya caché, para coger lo nuevo)
+    console.log("🤖 Sincronizando productos con Shopify (esto puede tardar la primera vez)...");
+    try {
+        await syncCatalog();
+    } catch (error) {
+        console.error("❌ ERROR CRÍTICO INDEXANDO:", error);
+        // No hacemos throw para que el servidor no se caiga
     }
     console.log(`✅ Productos listos en memoria: ${aiIndex.length}`);
 
-    // Carga de FAQs
-    if (fs.existsSync(FAQ_FILE)) {
-        try {
-            const rawFaqs = JSON.parse(fs.readFileSync(FAQ_FILE, "utf8"));
-            faqIndex = [];
-            console.log("🤖 Indexando FAQs...");
-            for (const f of rawFaqs) {
-                const emb = await openai.embeddings.create({ model: "text-embedding-3-large", input: f.question });
-                faqIndex.push({ ...f, embedding: emb.data[0].embedding });
-            }
-            console.log(`✅ FAQs listas: ${faqIndex.length}`);
-        } catch(e) { console.error("Error cargando FAQs:", e); }
-    }
+    // 3. FAQs (solo una vez: vienen del repo y cambian al desplegar)
+    if (faqIndex.length === 0) await loadFaqs();
+}
+
+// Sincronización periódica para que los productos nuevos aparezcan solos.
+function startCatalogSync() {
+    setInterval(() => {
+        syncCatalog().catch(err => console.error("⚠️ Error en sync periódica:", err.message));
+    }, SYNC_INTERVAL_MS);
 }
 
 // 🧹 REFINAMIENTO: Traduce "quiero unos pantalones" a una query técnica
@@ -861,6 +938,15 @@ app.post("/api/ai/search", async (req, res) => {
             const cleanDescription = cleanText(p.body_html || p.description);
             const stockText = formatStockForAI(p.variants); // Generado con datos frescos
 
+            // 🖼️ MAPA COLOR -> ID DE VARIANTE (para que la IA pueda pedir la imagen del color correcto)
+            const colorVariantIds = {};
+            (p.variants || []).forEach(v => {
+                const colorOpt = v.selectedOptions?.find(o => o.name.toLowerCase() === "color");
+                const color = colorOpt ? colorOpt.value : "Único";
+                if (!colorVariantIds[color]) colorVariantIds[color] = v.id;
+            });
+            const variantIdsText = Object.entries(colorVariantIds).map(([c, vid]) => `${c}=${vid}`).join(", ");
+
             // ETIQUETA VISUAL PARA LA IA
             let tag = "";
             if (productOnScreen && String(p.id) === String(productOnScreen.id)) tag = " (🔥 USUARIO VIENDO AHORA)";
@@ -871,6 +957,7 @@ app.post("/api/ai/search", async (req, res) => {
             - Título: ${p.title}
             - Precio: ${p.price} €
             - Colores: ${officialColors}
+            - IDs de variante por color: ${variantIdsText}
             - Stock: ${stockText}`;
         }).join("\n\n");
 
@@ -914,6 +1001,13 @@ app.post("/api/ai/search", async (req, res) => {
                           2. ⚠️ JSON "products": [ID1, ID2, ID3...] <-- ¡OBLIGATORIO LLENARLO CON TODO LO ENCONTRADO!
                         - PROHIBIDO: No des enlaces de tallas ni precios específicos en el texto si estás en este modo. Obliga al usuario a clicar en la tarjeta.
 
+                    4bis. 🎨 IMAGEN DEL COLOR CORRECTO (¡MUY IMPORTANTE, EVITA UN BUG CONOCIDO!):
+                        - Cada producto de abajo trae "IDs de variante por color" (ej: "WHITE=41234, BLACK=41235").
+                        - Si el usuario ha pedido/filtrado por un color concreto (ej: "blancas", "en negro") o solo tiene sentido recomendar un color concreto según la conversación, NO metas el ID del producto como texto/número suelto en "products".
+                        - En su lugar, mete un OBJETO: {"id": "<ID del producto>", "variant_id": "<ID de variante correspondiente a ESE color, sacado de 'IDs de variante por color'>"}.
+                        - Esto es lo que hace que la tarjeta muestre la foto del color correcto (si no mandas variant_id, se muestra la foto por defecto del producto y el cliente ve un color que no pidió).
+                        - Si NO hay un color concreto en juego (ej. modo carrusel de familias, o el producto es de color único), puedes seguir mandando solo el ID como antes (string o número).
+
                     5. 🚨 DERIVACIÓN A HUMANO (PRIORIDAD MÁXIMA):
                         - Si piden "agente", "humano", "persona": NO INTENTES AYUDAR.
                         - RESPUESTA OBLIGATORIA: "¡Claro! Voy a derivarte con un agente de nuestro equipo, que te responderá aquí mismo en cuanto pueda (horario: L-J 08:00-17:00, V 07:00-15:00). Si es fuera de ese horario, tu mensaje se queda guardado y te contestamos en cuanto abramos. Mientras tanto, cuéntame lo que necesitas y se lo dejo preparado."
@@ -937,6 +1031,16 @@ app.post("/api/ai/search", async (req, res) => {
                         - Si "ALERTA SEGURIDAD" es "FALTA_EMAIL", pide el email de la compra. Si es "FALTA_PEDIDO_ID", pide el número de pedido. Si no hay alerta y falta el número, simplemente pídelo.
                         - Solo si tras pedir el número de pedido el cliente no puede dártelo o el sistema no lo encuentra, deriva a info@izas-outdoor.com.
 
+                    9. 🏷️ ETIQUETA DE LA CONVERSACIÓN (campo "category"):
+                        - OBLIGATORIO: elige EXACTAMENTE UNA de esta lista cerrada. Nunca inventes una etiqueta nueva ni la escribas de otra forma (ni tildes distintas, ni sinónimos, ni en otro idioma): así evitamos que la misma duda quede repartida en estadísticas bajo nombres distintos.
+                        - "PRODUCTO": dudas sobre productos concretos (características, tallas, colores, stock, comparar modelos, recomendaciones).
+                        - "PEDIDO": estado o seguimiento de un pedido ya realizado.
+                        - "ENVIO": plazos, costes, zonas o condiciones de envío (sin ser sobre un pedido concreto).
+                        - "DEVOLUCION": devoluciones, cambios o cancelaciones.
+                        - "MEMBERS": cualquier cosa sobre Izas Members (puntos, nivel, ventajas, cómo funciona, alta al programa).
+                        - "DERIVACION_HUMANA": ya definida en la regla 5, tiene prioridad sobre cualquier otra etiqueta.
+                        - "GENERAL": todo lo demás (saludos, marca, dudas que no encajan arriba).
+
                     --- DATOS ---
                     ALERTA SEGURIDAD: ${securityWarning || "Ninguna"}
                     DATOS PEDIDO LIVE: ${orderData || "N/A"}
@@ -945,7 +1049,7 @@ app.post("/api/ai/search", async (req, res) => {
                     FAQs: ${faqResults.map(f => `P:${f.question} R:${f.answer}`).join("\n")}
                     PRODUCTOS DISPONIBLES: ${productsContext}
 
-                    Responde JSON: { "reply": "...", "products": [...], "category": "ETIQUETA" }
+                    Responde JSON: { "reply": "...", "products": [...], "category": "PRODUCTO|PEDIDO|ENVIO|DEVOLUCION|MEMBERS|DERIVACION_HUMANA|GENERAL" }
                     `
                 },
                 ...history.slice(-2).map(m => ({ role: m.role, content: m.content })),
@@ -1265,9 +1369,37 @@ app.get("/api/chat/updates", async (req, res) => {
 /* ==========================================================================
    🚀 INICIO DEL SERVIDOR
    ========================================================================== */
+// Estado del índice (útil para comprobar tras un deploy que el catálogo cargó).
+app.get("/health", (req, res) => {
+    res.json({ status: "ok", productsIndexed: aiIndex.length, faqsIndexed: faqIndex.length, lastSync });
+});
+
+// Fuerza una sincronización del catálogo al momento (producto recién subido que
+// no quieres esperar a que entre en el ciclo automático). Requiere la variable
+// ADMIN_TOKEN en el servidor y la cabecera x-admin-token con el mismo valor.
+app.post("/api/admin/reindex", async (req, res) => {
+    const expected = process.env.ADMIN_TOKEN;
+    if (!expected) return res.status(503).json({ error: "ADMIN_TOKEN no configurado" });
+
+    const given = String(req.headers["x-admin-token"] || "");
+    const a = Buffer.from(given), b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+        return res.status(401).json({ error: "No autorizado" });
+    }
+
+    try {
+        const result = await syncCatalog();
+        res.json({ ok: true, result: result || lastSync });
+    } catch (error) {
+        console.error("❌ Error en reindex manual:", error);
+        res.status(500).json({ error: "Error sincronizando el catálogo" });
+    }
+});
+
 app.listen(PORT, async () => {
     console.log(`🚀 Server en http://localhost:${PORT}`);
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
+    startCatalogSync();
 
 });

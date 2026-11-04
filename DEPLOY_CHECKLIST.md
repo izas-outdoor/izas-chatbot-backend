@@ -4,7 +4,7 @@ Guía para poner en producción los cambios de backend, script de Shopify y visu
 
 ## 0. Antes de empezar (Supabase)
 
-- [ ] Abre **Supabase → SQL Editor** y ejecuta `SUPABASE_SETUP.sql`. Crea la tabla `ai_index` y activa RLS.
+- [ ] Abre **Supabase → SQL Editor** y ejecuta `SUPABASE_SETUP.sql` para activar RLS. (La tabla `ai_index` que crea **no la usa el código actual**: el índice se guarda en `ai-index.json` en disco.)
 - [ ] Decide la política de lectura del visualizador (Opción A autenticada — recomendada — u Opción B anon) y descomenta la que elijas en ese SQL.
 - [ ] **Importante:** confirma que la variable `SUPABASE_KEY` del **backend** es la **service_role key** (no la anon). El backend necesita saltarse el RLS para leer/escribir. La anon key es solo para el visualizador.
 
@@ -24,7 +24,7 @@ Pasos:
 
 - [ ] Sube el `server.js` actualizado y haz deploy.
 - [ ] Comprueba el arranque: visita `https://<tu-backend>/health` → debe responder `{ "status": "ok", "productsIndexed": N, ... }`.
-- [ ] La **primera** vez indexará desde Shopify (tarda) y guardará en Supabase. Los siguientes arranques cargarán desde Supabase sin re-vectorizar (mira los logs: "Índice cargado desde Supabase").
+- [ ] Al arrancar sincroniza con Shopify y guarda una caché en disco (`ai-index.json`). Mira los logs: "🔄 Sync catálogo: +N nuevos, ...". En Render el disco es efímero, así que tras cada reinicio la primera sincronización vectoriza todo el catálogo.
 
 ## 2. Script de Shopify (theme)
 
@@ -64,7 +64,7 @@ Abre la tienda y el chat, y comprueba con la consola del navegador abierta:
 
 Ya **no hace falta reindexar a mano**. El backend sincroniza el catálogo solo:
 
-- A los ~2 minutos de arrancar.
+- Al arrancar.
 - Cada `SYNC_INTERVAL_MS` (por defecto 6h) de forma indefinida.
 
 La sincronización es **incremental**: solo vectoriza productos **nuevos o cambiados**
@@ -80,4 +80,4 @@ curl -X POST https://<tu-backend>/api/admin/reindex \
   -H "x-admin-token: TU_ADMIN_TOKEN"
 ```
 
-(Esto hace una reconstrucción completa. Para el día a día no es necesario.)
+(Requiere `ADMIN_TOKEN` configurado. Hace una sincronización incremental al momento y devuelve cuántos productos añadió, cambió y eliminó. Para el día a día no es necesario.)
