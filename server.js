@@ -908,7 +908,7 @@ app.post("/api/ai/search", async (req, res) => {
         const faqResults = faqIndex
             .map(f => ({ ...f, score: cosineSimilarity(vector, f.embedding) }))
             .sort((a, b) => b.score - a.score)
-            .slice(0, 2);
+            .slice(0, 4); // 4 (antes 2): una duda puede repartirse entre varias FAQs
 
         // Unimos los resultados
         const combinedCandidates = new Map();
