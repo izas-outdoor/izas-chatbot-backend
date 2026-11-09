@@ -785,8 +785,8 @@ app.post("/api/ai/search", async (req, res) => {
     // Vienen ya resueltos por el frontend desde /apps/izas-members/perfil (App Proxy firmado),
     // así que aquí solo los formateamos para el prompt, sin volver a consultar nada.
     const TIER_BENEFITS = {
-        BRONCE: "Envío gratis desde 59,99€. Regalo de cumpleaños: 100 puntos.",
-        PLATA: "Envío gratis desde 49,99€. +10% de puntos en compras de 200€ o más. Acceso anticipado a colecciones. Regalo de cumpleaños: 150 puntos.",
+        BRONCE: "Envío gratis a partir de 60€ (con una cesta de 59,99€ o menos NO se aplica). Regalo de cumpleaños: 100 puntos.",
+        PLATA: "Envío gratis a partir de 50€ (con una cesta de 49,99€ o menos NO se aplica). +10% de puntos en compras de 200€ o más. Acceso anticipado a colecciones. Regalo de cumpleaños: 150 puntos.",
         ORO: "Envío siempre gratis. +20% de puntos en compras de 200€ o más. Acceso anticipado a colecciones. Regalo de cumpleaños: 200 puntos + cupón 10% (7 días)."
     };
     const loginLink = login_url || "https://www.izas-outdoor.com/account/login";
