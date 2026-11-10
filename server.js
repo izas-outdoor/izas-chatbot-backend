@@ -201,6 +201,49 @@ function cleanText(text) {
         .substring(0, 600);         // Corta para no gastar muchos tokens
 }
 
+// Aplana el valor de un metacampo a texto plano. Admite texto, números, listas
+// y el JSON "rich text" de Shopify ({type:"root", children:[...]}). Ignora los
+// ids de metaobjetos (gid://...), que no significan nada para el modelo.
+function metafieldToText(value) {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "number") return String(value);
+    if (typeof value === "string") return value.startsWith("gid://") ? "" : value.trim();
+    if (Array.isArray(value)) return value.map(metafieldToText).filter(Boolean).join(", ");
+    if (typeof value === "object") {
+        if (Array.isArray(value.children)) {
+            const parts = value.children.map(metafieldToText).filter(Boolean);
+            return parts.join(value.type === "list" ? "; " : " ");
+        }
+        if (typeof value.value === "string") return value.value.trim();
+    }
+    return "";
+}
+
+// Ficha del producto para el prompt: descripción y metacampos útiles para
+// comparar o responder dudas (material, ajuste, tecnologías, características...).
+// Cada campo se recorta para no disparar los tokens con 10 productos a la vez.
+function formatProductDetails(p) {
+    const mf = p.metafields || {};
+    const field = (label, text, max) => {
+        const t = (text || "").replace(/\s+/g, " ").trim();
+        return t ? `- ${label}: ${t.substring(0, max)}` : null;
+    };
+    const summary = metafieldToText(mf["custom.descripcion_corta"]);
+    let description = (p.body_html || p.description || "").replace(/<[^>]*>?/gm, " ").replace(/\s+/g, " ").trim();
+    if (description === summary) description = ""; // evita repetir el mismo texto dos veces
+    return [
+        field("Resumen", summary, 200),
+        field("Descripción", description, 300),
+        field("Material", metafieldToText(mf["custom.material"]), 120),
+        field("Ajuste", metafieldToText(mf["custom.ajuste"]), 60),
+        field("Tecnologías", metafieldToText(mf["custom.tecnologia"]), 120),
+        field("Prestaciones", metafieldToText(mf["custom.detalles_tecnicos"]), 200),
+        field("Características", metafieldToText(mf["custom.caracteristicas"]), 450),
+        field("Detalles", metafieldToText(mf["custom.detalles"]), 300),
+        field("Actividad", metafieldToText(mf["custom.actividad-lista"]), 80)
+    ].filter(Boolean).join("\n            ");
+}
+
 // Cálculo matemático para ver similitud entre vectores (Búsqueda Semántica)
 function cosineSimilarity(a, b) {
     return a.reduce((acc, val, i) => acc + val * b[i], 0);
@@ -935,7 +978,7 @@ app.post("/api/ai/search", async (req, res) => {
         const productsContext = finalCandidatesList.map(p => {
             const colorOption = p.options ? p.options.find(o => o.name.match(/color|cor/i)) : null;
             const officialColors = colorOption ? colorOption.values.join(", ") : "Único";
-            const cleanDescription = cleanText(p.body_html || p.description);
+            const detailsText = formatProductDetails(p);
             const stockText = formatStockForAI(p.variants); // Generado con datos frescos
 
             // 🖼️ MAPA COLOR -> ID DE VARIANTE (para que la IA pueda pedir la imagen del color correcto)
@@ -958,7 +1001,8 @@ app.post("/api/ai/search", async (req, res) => {
             - Precio: ${p.price} €
             - Colores: ${officialColors}
             - IDs de variante por color: ${variantIdsText}
-            - Stock: ${stockText}`;
+            - Stock: ${stockText}
+            ${detailsText}`;
         }).join("\n\n");
 
         // ---------------------------------------------------------
