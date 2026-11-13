@@ -46,8 +46,8 @@
   },
   {
     "id": "coste_envio",
-    "question": "¿Cuánto cuestan los gastos de envío?",
-    "answer": "El envío es GRATIS para pedidos superiores a 79,99€. Para pedidos inferiores, el coste es de 4,99€."
+    "question": "¿Hay envío gratuito? ¿Cuánto cuestan los gastos de envío y a partir de qué importe es gratis?",
+    "answer": "El envío es GRATIS a partir de 80€ (80€ incluido). Para pedidos de menos de 80€ (hasta 79,99€), el coste es de 4,99€. Los socios de Izas Members tienen envío gratis desde un importe menor: Bronce a partir de 60€, Plata a partir de 50€ y Oro siempre gratis."
   },
   {
     "id": "devolucion_externa",

@@ -666,22 +666,27 @@ async function syncCatalog() {
     return syncInFlight;
 }
 
-let faqsLoading = false;
-async function loadFaqs() {
-    if (faqsLoading || !fs.existsSync(FAQ_FILE)) return;
-    faqsLoading = true;
-    try {
-        const rawFaqs = JSON.parse(fs.readFileSync(FAQ_FILE, "utf8"));
-        const next = [];
-        console.log("🤖 Indexando FAQs...");
-        for (const f of rawFaqs) {
-            const emb = await openai.embeddings.create({ model: "text-embedding-3-large", input: f.question });
-            next.push({ ...f, embedding: emb.data[0].embedding });
-        }
-        faqIndex = next;
-        console.log(`✅ FAQs listas: ${faqIndex.length}`);
-    } catch(e) { console.error("Error cargando FAQs:", e); }
-    finally { faqsLoading = false; }
+// Si ya hay una carga en curso, quien llame espera a esa misma (no devuelve
+// "vacío" de inmediato: una petición que llegue mientras arranca el servidor
+// respondería sin ninguna FAQ).
+let faqsLoading = null;
+function loadFaqs() {
+    if (faqsLoading) return faqsLoading;
+    if (!fs.existsSync(FAQ_FILE)) return Promise.resolve();
+    faqsLoading = (async () => {
+        try {
+            const rawFaqs = JSON.parse(fs.readFileSync(FAQ_FILE, "utf8"));
+            const next = [];
+            console.log("🤖 Indexando FAQs...");
+            for (const f of rawFaqs) {
+                const emb = await openai.embeddings.create({ model: "text-embedding-3-large", input: f.question });
+                next.push({ ...f, embedding: emb.data[0].embedding });
+            }
+            faqIndex = next;
+            console.log(`✅ FAQs listas: ${faqIndex.length}`);
+        } catch(e) { console.error("Error cargando FAQs:", e); }
+    })().finally(() => { faqsLoading = null; });
+    return faqsLoading;
 }
 
 // Carga los productos al iniciar el servidor (caché en disco para arrancar
@@ -704,7 +709,12 @@ async function loadIndexes() {
         }
     }
 
-    // 2. Sincronizamos con Shopify (aunque haya caché, para coger lo nuevo)
+    // 2. FAQs primero (son 40 vectores: segundos). Antes iban DESPUÉS de la
+    //    sincronización del catálogo, que en un arranque en frío tarda minutos, y
+    //    durante ese rato el bot contestaba sin FAQs ("no tengo esa información").
+    if (faqIndex.length === 0) await loadFaqs();
+
+    // 3. Sincronizamos con Shopify (aunque haya caché, para coger lo nuevo)
     console.log("🤖 Sincronizando productos con Shopify (esto puede tardar la primera vez)...");
     try {
         await syncCatalog();
@@ -713,9 +723,6 @@ async function loadIndexes() {
         // No hacemos throw para que el servidor no se caiga
     }
     console.log(`✅ Productos listos en memoria: ${aiIndex.length}`);
-
-    // 3. FAQs (solo una vez: vienen del repo y cambian al desplegar)
-    if (faqIndex.length === 0) await loadFaqs();
 }
 
 // Sincronización periódica para que los productos nuevos aparezcan solos.
@@ -932,6 +939,7 @@ app.post("/api/ai/search", async (req, res) => {
         const optimizedQuery = await refineQuery(normalizedQuery, history || []);
         
         if (aiIndex.length === 0) await loadIndexes();
+        else if (faqIndex.length === 0) await loadFaqs(); // FAQs aún sin cargar (arranque reciente o fallo previo)
 
         // 🔥🔥🔥 CONTEXTO WEB: Detectamos si hay un producto en pantalla 🔥🔥🔥
         let productOnScreen = null;
@@ -1108,6 +1116,10 @@ app.post("/api/ai/search", async (req, res) => {
                         - No afirmes si las medidas de la prenda están tomadas en plano o en contorno, porque no lo sabes: preséntalas como "las medidas de la prenda según la guía de tallas".
                         - Si piden la tabla completa, preséntala en formato ordenado y breve (una línea por talla). Si quieres remitirle a la guía visual, dile que la encuentra en la página del producto, en la sección "Medidas del Producto". Nunca la llames "Ver Tallas" ni "guía de tallas visual".
                         - Disponibilidad de una talla = stock (regla 6); la guía solo dice cómo es cada talla, no si queda.
+
+                    6ter. 🚚 GASTOS DE ENVÍO:
+                        - Si preguntan si hay envío gratuito o cuánto cuesta el envío, responde con la FAQ de gastos de envío: gratis a partir de 80€ (80€ incluido), 4,99€ por debajo. NUNCA digas que no tienes los umbrales o que "depende": están en las FAQs.
+                        - Si el cliente es socio (el bloque "DATOS SOCIO IZAS MEMBERS" trae su nivel real), añade el umbral de SU nivel, que es el que le aplica. Si no es socio o no sabes su nivel, puedes mencionar brevemente que los socios de Izas Members tienen envío gratis desde menos importe.
 
                     7. 🎖️ PUNTOS, NIVEL Y VENTAJAS DE IZAS MEMBERS (CLIENTE ACTUAL):
                         - Si el usuario pregunta por SUS puntos, nivel, saldo o "qué ventajas/beneficios tengo", usa EXCLUSIVAMENTE el bloque "DATOS SOCIO IZAS MEMBERS" de abajo (incluye ya las ventajas de su nivel concreto). No inventes ni calcules cifras, y no menciones niveles que no sean el suyo.
