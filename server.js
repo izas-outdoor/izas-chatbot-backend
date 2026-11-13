@@ -1015,7 +1015,7 @@ app.post("/api/ai/search", async (req, res) => {
             const colorOption = p.options ? p.options.find(o => o.name.match(/color|cor/i)) : null;
             const officialColors = colorOption ? colorOption.values.join(", ") : "Único";
             const sizeGuideText = wantsSizeGuide ? formatSizeGuide(p.sizeGuide) : "";
-            const detailsText = formatProductDetails(p) + (sizeGuideText ? `\n            - Guía de tallas (medidas en cm): ${sizeGuideText}` : "");
+            const detailsText = formatProductDetails(p) + (sizeGuideText ? `\n            - Guía de tallas (medidas de la prenda en cm):${sizeGuideText}` : "");
             const stockText = formatStockForAI(p.variants); // Generado con datos frescos
 
             // 🖼️ MAPA COLOR -> ID DE VARIANTE (para que la IA pueda pedir la imagen del color correcto)
@@ -1101,10 +1101,11 @@ app.post("/api/ai/search", async (req, res) => {
                         - Si el producto 1 no tiene, pero el producto 2 sí, responde: "Sí, la tengo disponible en talla XXL en color [Color del Producto 2]".
 
                     6bis. 📏 GUÍAS DE TALLAS Y MEDIDAS:
-                        - Si un producto trae "Guía de tallas (medidas en cm)", úsala para responder dudas de medidas y recomendar talla. Cada talla va con sus medidas (cintura, cadera, pecho, hombros, largo/ancho de plantilla...).
+                        - Si un producto trae "Guía de tallas (medidas de la prenda en cm)", úsala para responder dudas de medidas y recomendar talla. Cada talla va con sus medidas (cintura, cadera, pecho, hombros, largo/ancho de plantilla...).
+                        - Esas medidas son las de la PRENDA (o del calzado), en centímetros, NO las del cuerpo: la prenda lleva holgura. Nunca digas que son las medidas del cuerpo que corresponden a cada talla.
                         - Cita SOLO las cifras que aparecen en esa guía. No inventes medidas, no las conviertas ni las estimes. Si el producto no trae guía, dilo y no improvises.
-                        - Para recomendar talla, pide al cliente sus medidas (o su talla habitual en otras prendas) y compáralas con la tabla. Si queda entre dos tallas, ofrece ambas y explica la diferencia.
-                        - No afirmes si las medidas de la tabla son del cuerpo o de la prenda, porque no lo sabes: preséntalas como "las medidas de la guía de tallas".
+                        - Para recomendar talla, pide al cliente su talla habitual en otras prendas o las medidas de una prenda suya que le quede bien, y compáralas con la tabla. Si solo te da medidas de su cuerpo, aclara que la tabla es de la prenda y ayúdale a elegir con cautela, ofreciendo la talla más probable y la contigua. Si queda entre dos tallas, ofrece ambas y explica la diferencia.
+                        - No afirmes si las medidas de la prenda están tomadas en plano o en contorno, porque no lo sabes: preséntalas como "las medidas de la prenda según la guía de tallas".
                         - Si piden la tabla completa, preséntala en formato ordenado y breve (una línea por talla). Recuerda que además puede ver la guía visual pulsando "Ver Tallas" en la tarjeta.
                         - Disponibilidad de una talla = stock (regla 6); la guía solo dice cómo es cada talla, no si queda.
 
