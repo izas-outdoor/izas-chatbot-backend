@@ -244,6 +244,30 @@ function formatProductDetails(p) {
     ].filter(Boolean).join("\n            ");
 }
 
+// Convierte el metaobjeto guia_de_tallas (devuelto por Shopify como lista de
+// {key, value}) en { name, rows: [{ talla, cintura, ... }] }. Devuelve null si
+// el producto no tiene guía o la tabla no es un JSON válido.
+function parseSizeGuide(metafield) {
+    const fields = metafield?.reference?.fields;
+    if (!Array.isArray(fields)) return null;
+    const byKey = Object.fromEntries(fields.map(f => [f.key, f.value]));
+    const rows = safeParse(byKey.tabla_de_medidas);
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    return { name: byKey.nombre_interno || "", rows };
+}
+
+const SIZE_GUIDE_LABELS = { largoplantilla: "largo plantilla", anchoplantilla: "ancho plantilla" };
+
+// Una línea por talla, con solo las medidas que tenga: "XS: cintura 34, cadera 46".
+function formatSizeGuide(guide) {
+    if (!guide || !Array.isArray(guide.rows)) return "";
+    return guide.rows.map(row => {
+        const { talla, ...measures } = row;
+        const parts = Object.entries(measures).map(([k, v]) => `${SIZE_GUIDE_LABELS[k] || k} ${v}`);
+        return `${talla}: ${parts.join(", ")}`;
+    }).join(" | ");
+}
+
 // Cálculo matemático para ver similitud entre vectores (Búsqueda Semántica)
 function cosineSimilarity(a, b) {
     return a.reduce((acc, val, i) => acc + val * b[i], 0);
@@ -337,6 +361,11 @@ async function getAllProducts() {
               }
             }
             metafields(first: 20) { edges { node { namespace key value } } }
+            # GUÍA DE TALLAS: metaobjeto guia_de_tallas (nombre_interno, tabla_de_medidas).
+            # Se pide aparte porque los productos tienen más de 20 metacampos y podría quedar fuera del límite.
+            sizeGuide: metafield(namespace: "custom", key: "plantilla_de_tallas") {
+              reference { ... on Metaobject { fields { key value } } }
+            }
           }
         }
       }
@@ -382,6 +411,7 @@ async function getAllProducts() {
                     metafields: Object.fromEntries(
                         node.metafields.edges.map(m => [`${m.node.namespace}.${m.node.key}`, safeParse(m.node.value)])
                     ),
+                    sizeGuide: parseSizeGuide(node.sizeGuide),
                 });
             });
 
@@ -974,11 +1004,18 @@ app.post("/api/ai/search", async (req, res) => {
         // 🔥🔥🔥 LIVE STOCK CHECK: Actualizamos datos con Shopify en TIEMPO REAL 🔥🔥🔥
         finalCandidatesList = await getLiveStockForProducts(finalCandidatesList);
 
+        // 📏 Solo mandamos las tablas de medidas cuando la conversación va de tallas
+        // (mensaje actual o los últimos del cliente, para seguir un "¿y la M?"), así
+        // no gastamos tokens en el resto de consultas.
+        const recentUserText = [...(history || []).filter(m => m.role === "user").slice(-3).map(m => m.content), q].join(" ");
+        const wantsSizeGuide = /talla|medida|gu[ií]a|dimensi|size|cintura|cadera|pecho|hombro|plantilla|\bmido\b|me (queda|vale|sirve)|ajuste|calzo|\bpie\b/i.test(recentUserText);
+
         // Generamos el texto que leerá la IA
         const productsContext = finalCandidatesList.map(p => {
             const colorOption = p.options ? p.options.find(o => o.name.match(/color|cor/i)) : null;
             const officialColors = colorOption ? colorOption.values.join(", ") : "Único";
-            const detailsText = formatProductDetails(p);
+            const sizeGuideText = wantsSizeGuide ? formatSizeGuide(p.sizeGuide) : "";
+            const detailsText = formatProductDetails(p) + (sizeGuideText ? `\n            - Guía de tallas (medidas en cm): ${sizeGuideText}` : "");
             const stockText = formatStockForAI(p.variants); // Generado con datos frescos
 
             // 🖼️ MAPA COLOR -> ID DE VARIANTE (para que la IA pueda pedir la imagen del color correcto)
@@ -1062,6 +1099,14 @@ app.post("/api/ai/search", async (req, res) => {
                         - 🛑 NO mires solo el primer producto y digas "No".
                         - ✅ REVISA TODOS los productos listados abajo.
                         - Si el producto 1 no tiene, pero el producto 2 sí, responde: "Sí, la tengo disponible en talla XXL en color [Color del Producto 2]".
+
+                    6bis. 📏 GUÍAS DE TALLAS Y MEDIDAS:
+                        - Si un producto trae "Guía de tallas (medidas en cm)", úsala para responder dudas de medidas y recomendar talla. Cada talla va con sus medidas (cintura, cadera, pecho, hombros, largo/ancho de plantilla...).
+                        - Cita SOLO las cifras que aparecen en esa guía. No inventes medidas, no las conviertas ni las estimes. Si el producto no trae guía, dilo y no improvises.
+                        - Para recomendar talla, pide al cliente sus medidas (o su talla habitual en otras prendas) y compáralas con la tabla. Si queda entre dos tallas, ofrece ambas y explica la diferencia.
+                        - No afirmes si las medidas de la tabla son del cuerpo o de la prenda, porque no lo sabes: preséntalas como "las medidas de la guía de tallas".
+                        - Si piden la tabla completa, preséntala en formato ordenado y breve (una línea por talla). Recuerda que además puede ver la guía visual pulsando "Ver Tallas" en la tarjeta.
+                        - Disponibilidad de una talla = stock (regla 6); la guía solo dice cómo es cada talla, no si queda.
 
                     7. 🎖️ PUNTOS, NIVEL Y VENTAJAS DE IZAS MEMBERS (CLIENTE ACTUAL):
                         - Si el usuario pregunta por SUS puntos, nivel, saldo o "qué ventajas/beneficios tengo", usa EXCLUSIVAMENTE el bloque "DATOS SOCIO IZAS MEMBERS" de abajo (incluye ya las ventajas de su nivel concreto). No inventes ni calcules cifras, y no menciones niveles que no sean el suyo.
