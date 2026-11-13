@@ -1106,7 +1106,7 @@ app.post("/api/ai/search", async (req, res) => {
                         - Cita SOLO las cifras que aparecen en esa guía. No inventes medidas, no las conviertas ni las estimes. Si el producto no trae guía, dilo y no improvises.
                         - Para recomendar talla, pide al cliente su talla habitual en otras prendas o las medidas de una prenda suya que le quede bien, y compáralas con la tabla. Si solo te da medidas de su cuerpo, aclara que la tabla es de la prenda y ayúdale a elegir con cautela, ofreciendo la talla más probable y la contigua. Si queda entre dos tallas, ofrece ambas y explica la diferencia.
                         - No afirmes si las medidas de la prenda están tomadas en plano o en contorno, porque no lo sabes: preséntalas como "las medidas de la prenda según la guía de tallas".
-                        - Si piden la tabla completa, preséntala en formato ordenado y breve (una línea por talla). Recuerda que además puede ver la guía visual pulsando "Ver Tallas" en la tarjeta.
+                        - Si piden la tabla completa, preséntala en formato ordenado y breve (una línea por talla). Si quieres remitirle a la guía visual, dile que la encuentra en la página del producto, en la sección "Medidas del Producto". Nunca la llames "Ver Tallas" ni "guía de tallas visual".
                         - Disponibilidad de una talla = stock (regla 6); la guía solo dice cómo es cada talla, no si queda.
 
                     7. 🎖️ PUNTOS, NIVEL Y VENTAJAS DE IZAS MEMBERS (CLIENTE ACTUAL):
