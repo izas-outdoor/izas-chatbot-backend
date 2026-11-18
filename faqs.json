@@ -208,5 +208,10 @@
     "id": "descuento_estudiantes",
     "question": "He leído que tenéis descuento para estudiantes. ¿Tenéis descuento para estudiantes?",
     "answer": "Sí, en Izas Outdoor disponemos de un 10% de descuento para estudiantes aplicable a productos sin descuento. Para canjearlo, pudes hacerlo desde https://www.descuentoestudiante.com/Izas-descuento-estudiante-iframe"
+  },
+  {
+    "id": "descuento_newsletter",
+    "question": "¿Hay descuento por suscribirme a la newsletter? ¿Qué descuento tengo si me suscribo al boletín o a los correos de Izas?",
+    "answer": "Sí, al suscribirte a la newsletter de Izas Outdoor obtienes un 10% de descuento. Es un descuento no combinable con otros descuentos y no se aplica a artículos que ya tienen rebaja."
   }
 ]
