@@ -258,12 +258,22 @@ function parseSizeGuide(metafield) {
 
 const SIZE_GUIDE_LABELS = { largoplantilla: "largo plantilla", anchoplantilla: "ancho plantilla" };
 
-// Una línea por talla, con solo las medidas que tenga: "XS: cintura 34, cadera 46".
+// En las guías, pecho/cintura/cadera están tomadas a MEDIO contorno (la mitad de
+// la circunferencia de la prenda). Se añade el contorno completo (el doble) ya
+// calculado: el cliente lee "XL: 44" como si fuera la circunferencia y protesta.
+// Hombros y largos son medidas rectas y no se doblan.
+const HALF_CONTOUR_KEYS = new Set(["pecho", "cintura", "cadera"]);
+
+// Una línea por talla, con solo las medidas que tenga: "XS: cintura 34 (contorno 68), hombros 41".
 function formatSizeGuide(guide) {
     if (!guide || !Array.isArray(guide.rows)) return "";
     return guide.rows.map(row => {
         const { talla, ...measures } = row;
-        const parts = Object.entries(measures).map(([k, v]) => `${SIZE_GUIDE_LABELS[k] || k} ${v}`);
+        const parts = Object.entries(measures).map(([k, v]) => {
+            const n = Number(v);
+            const full = HALF_CONTOUR_KEYS.has(k) && Number.isFinite(n) ? ` (contorno ${Math.round(n * 200) / 100})` : "";
+            return `${SIZE_GUIDE_LABELS[k] || k} ${v}${full}`;
+        });
         return `${talla}: ${parts.join(", ")}`;
     }).join(" | ");
 }
@@ -1023,7 +1033,7 @@ app.post("/api/ai/search", async (req, res) => {
             const colorOption = p.options ? p.options.find(o => o.name.match(/color|cor/i)) : null;
             const officialColors = colorOption ? colorOption.values.join(", ") : "Único";
             const sizeGuideText = wantsSizeGuide ? formatSizeGuide(p.sizeGuide) : "";
-            const detailsText = formatProductDetails(p) + (sizeGuideText ? `\n            - Guía de tallas (medidas de la prenda en cm):${sizeGuideText}` : "");
+            const detailsText = formatProductDetails(p) + (sizeGuideText ? `\n            - Guía de tallas (medidas de la prenda en cm; pecho, cintura y cadera son MEDIO contorno y entre paréntesis va el contorno completo): ${sizeGuideText}` : "");
             const stockText = formatStockForAI(p.variants); // Generado con datos frescos
 
             // 🖼️ MAPA COLOR -> ID DE VARIANTE (para que la IA pueda pedir la imagen del color correcto)
@@ -1109,11 +1119,12 @@ app.post("/api/ai/search", async (req, res) => {
                         - Si el producto 1 no tiene, pero el producto 2 sí, responde: "Sí, la tengo disponible en talla XXL en color [Color del Producto 2]".
 
                     6bis. 📏 GUÍAS DE TALLAS Y MEDIDAS:
-                        - Si un producto trae "Guía de tallas (medidas de la prenda en cm)", úsala para responder dudas de medidas y recomendar talla. Cada talla va con sus medidas (cintura, cadera, pecho, hombros, largo/ancho de plantilla...).
+                        - Si un producto trae "Guía de tallas (medidas de la prenda en cm...)", úsala para responder dudas de medidas y recomendar talla. Cada talla va con sus medidas (cintura, cadera, pecho, hombros, largo/ancho de plantilla...).
                         - Esas medidas son las de la PRENDA (o del calzado), en centímetros, NO las del cuerpo: la prenda lleva holgura. Nunca digas que son las medidas del cuerpo que corresponden a cada talla.
-                        - Cita SOLO las cifras que aparecen en esa guía. No inventes medidas, no las conviertas ni las estimes. Si el producto no trae guía, dilo y no improvises.
+                        - 📐 PECHO, CINTURA Y CADERA ESTÁN A MEDIO CONTORNO: son la MITAD de la circunferencia de la prenda (medida en plano). Junto a cada una la guía ya trae entre paréntesis el contorno completo (el doble). Al citarlas di SIEMPRE ambos, p. ej. "pecho: 58 cm de medio contorno (116 cm de contorno completo)", y deja claro que el cliente debe compararlas con el contorno de su cuerpo o de una prenda suya usando el contorno completo. Si un cliente se queja de que "44 cm es muy poco para una XL", explícale con amabilidad que 44 cm es medio contorno y que el contorno completo es el doble (88 cm). Los hombros y los largos (pierna, falda, mano, pie, plantilla...) son medidas rectas: NO se doblan.
+                        - Cita SOLO las cifras que aparecen en esa guía (el contorno completo ya viene calculado). No inventes medidas ni hagas otras conversiones o estimaciones. Si el producto no trae guía, dilo y no improvises.
                         - Para recomendar talla, pide al cliente su talla habitual en otras prendas o las medidas de una prenda suya que le quede bien, y compáralas con la tabla. Si solo te da medidas de su cuerpo, aclara que la tabla es de la prenda y ayúdale a elegir con cautela, ofreciendo la talla más probable y la contigua. Si queda entre dos tallas, ofrece ambas y explica la diferencia.
-                        - No afirmes si las medidas de la prenda están tomadas en plano o en contorno, porque no lo sabes: preséntalas como "las medidas de la prenda según la guía de tallas".
+                        - Presenta siempre las cifras como "las medidas de la prenda según la guía de tallas".
                         - Si piden la tabla completa, preséntala en formato ordenado y breve (una línea por talla). Si quieres remitirle a la guía visual, dile que la encuentra en la página del producto, en la sección "Medidas del Producto". Nunca la llames "Ver Tallas" ni "guía de tallas visual".
                         - Disponibilidad de una talla = stock (regla 6); la guía solo dice cómo es cada talla, no si queda.
 
