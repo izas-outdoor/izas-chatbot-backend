@@ -1277,6 +1277,7 @@ app.post("/api/ai/search", async (req, res) => {
 
         // Avisamos solo en el momento en que la conversación PASA a derivada
         // (no en cada mensaje mientras lo siga estando).
+        if (newCategory === 'DERIVACION_HUMANA') customerEmail.markHandoff(currentSessionId);
         if (newCategory === 'DERIVACION_HUMANA' && previousCategory !== 'DERIVACION_HUMANA') {
             notifyAgentEmail(currentSessionId, q);
         }
@@ -1478,7 +1479,7 @@ app.post("/api/chat/agent-close", async (req, res) => {
    // El widget pregunta esto cada pocos segundos mientras el chat está abierto,
    // para detectar respuestas de agente sin necesidad de recargar la página.
 app.get("/api/chat/updates", async (req, res) => {
-    const { session_id, count } = req.query;
+    const { session_id, count, agent_only } = req.query;
     if (!session_id) return res.status(400).json({ error: "Falta session_id" });
 
     try {
@@ -1491,7 +1492,13 @@ app.get("/api/chat/updates", async (req, res) => {
         if (error || !data) return res.json({ newMessages: [] });
 
         const known = parseInt(count, 10) || 0;
-        const newMessages = (data.conversation || []).slice(known);
+        let newMessages = (data.conversation || []).slice(known);
+        // agent_only: el widget solo quiere lo que escribe (o cierra) un agente
+        // y compara con lo que ya tiene, sin depender de contar mensajes.
+        if (agent_only) {
+            newMessages = newMessages.filter(m => typeof m?.content === 'string' &&
+                (m.content.startsWith(AGENT_MARKER) || m.content.startsWith(AGENT_CLOSE_MARKER)));
+        }
         res.json({ newMessages });
 
     } catch (error) {

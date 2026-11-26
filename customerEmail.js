@@ -74,6 +74,15 @@ export function setupCustomerEmail({ app, supabase, fetch, agentMarker, agentClo
         return error ? null : data;
     }
 
+    // Sesiones que han pedido un agente desde el último arranque. Hace falta porque
+    // si el cliente sigue escribiendo antes de que le contesten, el bot puede
+    // cambiar la etiqueta de la conversación y ya no parecería derivada.
+    const requestedAgent = new Set();
+    function markHandoff(sessionId) {
+        requestedAgent.add(sessionId);
+        if (requestedAgent.size > 5000) requestedAgent.delete(requestedAgent.values().next().value);
+    }
+
     // ¿La conversación está ahora mismo en manos de un agente (o pidiéndolo)?
     function isHandedOff(row) {
         const conversation = row.conversation || [];
@@ -95,7 +104,7 @@ export function setupCustomerEmail({ app, supabase, fetch, agentMarker, agentClo
 
         try {
             const row = await getRow(session_id, 'conversation, category, customer_email, email_notified_at');
-            if (!row || !isHandedOff(row)) return res.status(409).json({ error: "La conversación no está pendiente de un agente" });
+            if (!row || !(isHandedOff(row) || requestedAgent.has(session_id))) return res.status(409).json({ error: "La conversación no está pendiente de un agente" });
 
             // Puede corregirlo (errata) mientras no haya contestado nadie. En cuanto
             // hay respuesta de un agente o un envío, queda fijado: así nadie puede
@@ -246,5 +255,5 @@ export function setupCustomerEmail({ app, supabase, fetch, agentMarker, agentClo
         sweep();
     }
 
-    return { queueAgentReply, start };
+    return { queueAgentReply, markHandoff, start };
 }
