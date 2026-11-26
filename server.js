@@ -1360,12 +1360,24 @@ app.post("/api/chat/log", async (req, res) => {
    realidad lo escribió una persona, no el modelo.
    ========================================================================== */
 
+// 🔐 Solo estas cuentas pueden actuar como agente. NO basta con tener una sesión
+// válida de Supabase: el registro del proyecto está abierto (lo usan otras
+// herramientas), así que cualquiera podría crearse un usuario. Por defecto, la
+// cuenta compartida del visualizador; AGENT_EMAILS (separadas por comas) permite
+// cambiarla sin tocar código. Si cambias esto, cambia también la política RLS de
+// lectura de chat_sessions en Supabase.
+const AGENT_EMAILS = new Set(
+    (process.env.AGENT_EMAILS || 'panel@izas-outdoor.com')
+        .split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
+);
+
 async function verifyAgentToken(req) {
     const authHeader = req.headers.authorization || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
     if (!token) return false;
     const { data, error } = await supabase.auth.getUser(token);
-    return !error && !!data?.user;
+    if (error || !data?.user?.email) return false;
+    return AGENT_EMAILS.has(data.user.email.toLowerCase());
 }
 
 app.post("/api/chat/agent-reply", async (req, res) => {
