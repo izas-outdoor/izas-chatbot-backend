@@ -17,6 +17,9 @@ Variables de entorno (Render → Environment):
 - [ ] `SUPABASE_URL`, `SUPABASE_KEY` — usar **service_role** key
 - [ ] `ALLOWED_ORIGINS` = `https://www.izas-outdoor.com,https://izas-outdoor.com` (CORS)
 - [ ] `ADMIN_TOKEN` = una cadena secreta larga (para `/api/admin/reindex`)
+- [ ] `RESEND_API_KEY` — avisos por correo (al equipo cuando se pide un agente y al cliente cuando se le contesta). Sin ella no se envía ninguno.
+- [ ] *(opcional)* `AGENT_EMAILS` — cuentas que pueden actuar como agente (por defecto la del visualizador). Debe coincidir con la política RLS de `chat_sessions`.
+- [ ] *(opcional)* `EMAIL_RETENTION_DAYS` — días que se conserva el correo del cliente (por defecto 90).
 - [ ] *(opcional)* `SHOPIFY_API_VERSION`, `LIVE_STOCK_TTL_MS`, `DEBUG=false`
 - [ ] *(opcional)* `SYNC_INTERVAL_MS` — cada cuánto se sincroniza el catálogo automáticamente (por defecto 6h = `21600000`)
 

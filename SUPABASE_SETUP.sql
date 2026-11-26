@@ -58,3 +58,22 @@ alter table public.ai_index      enable row level security;
 --    datos personales almacenados, puedes ejecutar algo así de vez en cuando:
 -- ----------------------------------------------------------------------------
 -- delete from public.chat_sessions where updated_at < now() - interval '90 days';
+
+-- ----------------------------------------------------------------------------
+-- 4) AVISO POR CORREO AL CLIENTE CUANDO LE CONTESTA UN AGENTE (customerEmail.js)
+--    Ejecutar ANTES de desplegar el backend que lo usa.
+-- ----------------------------------------------------------------------------
+alter table public.chat_sessions
+  add column if not exists customer_email     text,
+  add column if not exists customer_email_at  timestamptz,
+  add column if not exists email_due_at       timestamptz,
+  add column if not exists email_pending      jsonb,  -- mensajes de agente aún sin enviar ni ver
+  add column if not exists customer_seen_at   timestamptz,
+  add column if not exists email_notified_at  timestamptz,
+  add column if not exists email_status       text
+    check (email_status in ('pendiente', 'enviado', 'visto', 'error')),
+  add column if not exists email_error        text;
+
+create index if not exists chat_sessions_email_due_idx
+  on public.chat_sessions (email_due_at)
+  where email_due_at is not null;

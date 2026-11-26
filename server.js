@@ -22,6 +22,7 @@ import crypto from "crypto";
 import cors from "cors";
 import { COLOR_CONCEPTS, CONCEPTS } from "./concepts.js"; // Diccionarios de sinónimos
 import { createClient } from "@supabase/supabase-js";
+import { setupCustomerEmail } from "./customerEmail.js";
 
 /* --- 🏢 INFORMACIÓN DE MARCA (CONTEXTO FIJO) --- */
 const BRAND_INFO = `
@@ -114,6 +115,12 @@ async function notifyAgentEmail(sessionId, lastMessage) {
 
 app.use(cors({ origin: "*" })); // Permite conexiones desde cualquier lugar
 app.use(express.json()); // Permite recibir datos JSON
+
+// Aviso por correo al cliente cuando le contesta un agente (ver customerEmail.js)
+const customerEmail = setupCustomerEmail({
+    app, supabase, fetch: (...args) => fetch(...args),
+    agentMarker: AGENT_MARKER, agentCloseMarker: AGENT_CLOSE_MARKER
+});
 
 // Credenciales Shopify
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE;
@@ -1395,10 +1402,11 @@ app.post("/api/chat/agent-reply", async (req, res) => {
             .single();
 
         const history = (existing && existing.conversation) ? existing.conversation : [];
+        const replyAt = new Date().toISOString();
         history.push({
             role: 'assistant',
             content: AGENT_MARKER + content,
-            timestamp: new Date().toISOString()
+            timestamp: replyAt
         });
 
         const { error } = await supabase
@@ -1412,6 +1420,7 @@ app.post("/api/chat/agent-reply", async (req, res) => {
         if (error) throw error;
 
         console.log(`🧑‍💼 Respuesta de agente guardada para sesión ${session_id}`);
+        await customerEmail.queueAgentReply(session_id, content, replyAt);
         res.json({ success: true });
 
     } catch (error) {
@@ -1526,5 +1535,6 @@ app.listen(PORT, async () => {
     // Lanzamos la indexación en segundo plano (No usamos await para no bloquear el arranque en Render)
     loadIndexes().catch(err => console.error("⚠️ Error en carga inicial:", err));
     startCatalogSync();
+    customerEmail.start();
 
 });
