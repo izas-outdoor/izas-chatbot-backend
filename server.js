@@ -23,6 +23,7 @@ import cors from "cors";
 import { COLOR_CONCEPTS, CONCEPTS } from "./concepts.js"; // Diccionarios de sinónimos
 import { createClient } from "@supabase/supabase-js";
 import { setupCustomerEmail } from "./customerEmail.js";
+import { mergeConversation } from "./historyMerge.js";
 
 /* --- 🏢 INFORMACIÓN DE MARCA (CONTEXTO FIJO) --- */
 const BRAND_INFO = `
@@ -1265,7 +1266,22 @@ app.post("/api/ai/search", async (req, res) => {
             timestamp: new Date().toISOString() 
           }
         ];
-        const fullHistoryToSave = [...(history || []), ...newInteraction];
+        // Releemos justo antes de guardar: mientras el bot pensaba puede haber
+        // entrado un mensaje de agente o un clic de feedback.
+        let storedNow = [];
+        if (session_id) {
+            const { data: latest } = await supabase
+                .from('chat_sessions')
+                .select('conversation')
+                .eq('session_id', session_id)
+                .single();
+            storedNow = latest?.conversation || [];
+        }
+        const previousMessages = mergeConversation(storedNow, history, {
+            now: new Date().toISOString(),
+            reservedPrefixes: [AGENT_MARKER, AGENT_CLOSE_MARKER]
+        });
+        const fullHistoryToSave = [...previousMessages, ...newInteraction];
         const newCategory = aiContent.category || "GENERAL";
 
         supabase.from('chat_sessions').upsert({
